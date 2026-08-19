@@ -246,10 +246,10 @@ class TestAlertManagerRealtime:
         r1 = mgr.check_realtime(1, elapsed_sec=2.4, standard_sec=2.0)  # 20%
         assert r1 is None
 
-        # Zone 2: per-zone threshold, 20% over → เกิน 5% WARNING
+        # Zone 2: per-zone threshold, 20% over → เกิน 15% CRITICAL
         r2 = mgr.check_realtime(2, elapsed_sec=2.4, standard_sec=2.0)
         assert r2 is not None
-        assert r2.alert_level == AlertLevel.WARNING
+        assert r2.alert_level == AlertLevel.CRITICAL
 
     def test_per_zone_critical_lower_than_global(self):
         mgr, log = self._make_manager(warning=20, critical=50, cooldown=0)

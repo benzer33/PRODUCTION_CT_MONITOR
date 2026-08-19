@@ -106,9 +106,9 @@ class ZoneThreshold:
         คืน AlertLevel ที่เหมาะสมตาม over_pct
         คืน None ถ้ายังไม่เกิน threshold ไหนเลย
         """
-        if self.critical_pct > 0 and over_pct >= self.critical_pct:
+        if self.critical_pct > 0 and over_pct >= self.critical_pct - 1e-9:
             return AlertLevel.CRITICAL
-        if self.warning_pct > 0 and over_pct >= self.warning_pct:
+        if self.warning_pct > 0 and over_pct >= self.warning_pct - 1e-9:
             return AlertLevel.WARNING
         return None
 
@@ -450,7 +450,7 @@ class AlertManager:
 
         force=True ข้ามการ cooldown (ใช้กับ sequence violations)
         """
-        key  = (event.alert_type, event.zone_id, event.alert_level)
+        key  = (event.alert_type, event.zone_id)
         now  = time.monotonic()
         last = self._last_fired.get(key, 0.0)
 

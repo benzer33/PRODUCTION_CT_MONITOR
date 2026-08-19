@@ -598,7 +598,7 @@ class DTWComparator:
             live_res    = _resample(live_arr, self._N_RESAMPLE)
             golden_res  = golden.trajectory   # already resampled
 
-            # Normalise เพื่อ shape comparison (ไม่แตะ pixel-space)
+            # Normalise to [0,1]×[0,1] for shape comparison (not pixel-space)
             live_norm   = _normalise(live_res)
             golden_norm = _normalise(golden_res)
 

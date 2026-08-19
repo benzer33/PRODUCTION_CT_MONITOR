@@ -169,7 +169,8 @@ class TestHelpers:
         arr = np.array([[5.0, 7.0]])
         res = _resample(arr, 10)
         assert res.shape == (10, 2)
-        assert np.allclose(res, 5.0, atol=0.1)  # ทุก point ควรเหมือนกัน
+        assert np.allclose(res[:, 0], 5.0, atol=0.1)  # x column all 5.0
+        assert np.allclose(res[:, 1], 7.0, atol=0.1)  # y column all 7.0
 
     def test_normalise_range(self):
         arr = np.array([[0.0, 0.0], [100.0, 50.0], [50.0, 25.0]])
