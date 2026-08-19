@@ -107,6 +107,29 @@ def _normalise(arr: np.ndarray) -> np.ndarray:
     return (arr - mins) / rng
 
 
+def _normalise_to_ref(
+    arr:      np.ndarray,
+    ref_mins: np.ndarray,
+    ref_maxs: np.ndarray,
+) -> np.ndarray:
+    """
+    Normalise (N, 2) array using a FIXED reference bounding box.
+
+    Unlike _normalise() which uses each trajectory's own min/max, this
+    function preserves positional information relative to a shared reference.
+    Two trajectories at different screen locations will therefore have
+    different normalised values — which is required for a meaningful DTW
+    similarity score.
+
+    Typical usage: pass golden_res.min/max as the reference so that the
+    golden trajectory maps to [0,1]² and the live trajectory is expressed
+    in the same coordinate frame.
+    """
+    rng = ref_maxs - ref_mins
+    rng = np.where(rng == 0, 1.0, rng)
+    return (arr - ref_mins) / rng
+
+
 # ============================================================================
 # ── DTW computation — ใช้ backend ที่ดีที่สุดที่มี ──────────────────────────
 # ============================================================================
@@ -598,15 +621,24 @@ class DTWComparator:
             live_res    = _resample(live_arr, self._N_RESAMPLE)
             golden_res  = golden.trajectory   # already resampled
 
-            # Normalise to [0,1]×[0,1] for shape comparison (not pixel-space)
-            live_norm   = _normalise(live_res)
-            golden_norm = _normalise(golden_res)
+            # Normalise to golden's bounding box so positional differences
+            # between live and golden are preserved in the DTW distance.
+            ref_mins = golden_res.min(axis=0)
+            ref_maxs = golden_res.max(axis=0)
+            live_norm   = _normalise_to_ref(live_res,   ref_mins, ref_maxs)
+            golden_norm = _normalise_to_ref(golden_res, ref_mins, ref_maxs)
 
             dtw_dist, align_path = _dtw_compute(live_norm, golden_norm)
 
-            result.dtw_distance    = dtw_dist
+            # Divide by alignment path length → per-point average distance.
+            # This makes the score independent of trajectory length and the
+            # number of DTW warping steps.
+            n_steps  = max(len(align_path), 1)
+            avg_dist = dtw_dist / n_steps
+
+            result.dtw_distance    = avg_dist
             result.alignment_path  = align_path
-            result.similarity_score = self._score(dtw_dist)
+            result.similarity_score = self._score(avg_dist)
         else:
             # ไม่มี trajectory → ใช้ linear alignment path แทน
             result.alignment_path   = [(i, i) for i in range(self._N_RESAMPLE)]
@@ -664,21 +696,40 @@ class DTWComparator:
         live_arr    = _to_array(live_traj)
         live_res    = _resample(live_arr, self._N_RESAMPLE)
         golden_res  = self._golden.trajectory
-        live_norm   = _normalise(live_res)
-        golden_norm = _normalise(golden_res)
-        dtw_dist, _ = _dtw_compute(live_norm, golden_norm)
-        return self._score(dtw_dist)
+        ref_mins = golden_res.min(axis=0)
+        ref_maxs = golden_res.max(axis=0)
+        live_norm   = _normalise_to_ref(live_res,   ref_mins, ref_maxs)
+        golden_norm = _normalise_to_ref(golden_res, ref_mins, ref_maxs)
+        dtw_dist, align_path = _dtw_compute(live_norm, golden_norm)
+        n_steps  = max(len(align_path), 1)
+        avg_dist = dtw_dist / n_steps
+        return self._score(avg_dist)
 
-    def _score(self, dtw_distance: float) -> float:
+    def _score(self, avg_dist: float) -> float:
         """
-        แปลง raw DTW distance → similarity score 0–100
+        Convert per-point average normalised DTW distance → similarity score 0–100.
 
-        ใช้ exponential decay: score = 100 × exp(−λ × distance)
-        โดย λ เลือกให้ distance = 0.5 (normalised units) → score ≈ 60
-        นั่นคือ λ = −ln(0.6) / 0.5 ≈ 1.02
+        Input
+        -----
+        avg_dist : mean Euclidean distance per DTW alignment step, expressed
+                   in the golden-reference-normalised coordinate space [0,1]².
+                   (= raw_dtw_distance / len(alignment_path))
+
+        Formula
+        -------
+        score = 100 × exp(−λ × avg_dist)
+
+        λ is calibrated so that avg_dist = 0.10 → score ≈ 60:
+            λ = −ln(0.6) / 0.10 ≈ 5.12
+
+        Typical values in practice
+        --------------------------
+        avg_dist ≈ 0.02–0.05  (trajectory with small noise)    → score 78–90
+        avg_dist ≈ 0.10       (moderate difference)             → score  60
+        avg_dist ≈ 1.0+       (trajectory at wrong position)    → score ≈0
         """
-        if dtw_distance <= 0:
+        if avg_dist <= 0:
             return 100.0
-        lam   = -math.log(0.6) / 0.5
-        score = 100.0 * math.exp(-lam * dtw_distance)
+        lam   = -math.log(0.6) / 0.10   # ≈ 5.12
+        score = 100.0 * math.exp(-lam * avg_dist)
         return round(max(0.0, min(100.0, score)), 1)
