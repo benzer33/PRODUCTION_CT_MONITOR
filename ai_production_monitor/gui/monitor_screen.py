@@ -29,12 +29,14 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from core.cycle_tracker import CycleTracker, CycleRecord
 from core.dtw_comparator import GoldenReference
+from core.point_trigger_detector import TriggerPoint
 from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
 from gui.widgets.video_widget import VideoWidget
 from gui.widgets.zone_widget import ZonePanel
-from vision.vision_thread import VisionThread
+from vision.point_tracker_thread import PointTrackerThread
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +151,8 @@ class MonitorScreen(QWidget):
         self._config      = config
         self._db          = db
         self._golden_ref  = golden_ref
-        self._vision_thread: VisionThread | None = None
+        self._tracker_thread: PointTrackerThread | None = None
+        self._cycle_tracker:  CycleTracker | None = None
         self._session_id: int | None = None
         self._cycle_id:   int | None = None
         self._cycle_number = 0
@@ -271,24 +274,39 @@ class MonitorScreen(QWidget):
         self._all_cycle_records = []
         self._cycle_number = 0
 
-        # Start vision thread
-        self._vision_thread = VisionThread(self._config)
-        self._vision_thread.set_mode(VisionThread.MODE_MONITOR)
-        if self._golden_ref:
-            self._vision_thread.set_golden_reference(self._golden_ref)
+        # Build trigger points from config (polygon centroid adapter)
+        trigger_points = _trigger_points_from_config(self._config)
 
-        self._vision_thread.frame_ready.connect(self._video.set_frame)
-        self._vision_thread.cycle_complete.connect(self._on_cycle_complete)
-        self._vision_thread.state_changed.connect(self._on_state_changed)
-        self._vision_thread.alert_fired.connect(self._on_alert)
-        self._vision_thread.stats_updated.connect(self._on_stats_updated)
-        self._vision_thread.error_occurred.connect(self._on_error)
-        self._vision_thread.start()
+        # Wire CycleTracker — runs in GUI thread, callbacks are invoked from
+        # the tracker thread via point_triggered signal (queued connection)
+        gc = self._config.get_golden_cycle()
+        std_times_raw = gc.get("standard_times", {})
+        std_times = {int(k): float(v) for k, v in std_times_raw.items()}
+        zone_ids  = [tp.point_id for tp in trigger_points]
+
+        self._cycle_tracker = CycleTracker(
+            zone_ids          = zone_ids,
+            standard_times    = std_times,
+            on_cycle_complete = self._cb_cycle_complete,
+            on_alert          = self._cb_alert,
+            on_sequence_error = self._cb_sequence_error,
+            on_state_change   = self._cb_state_change,
+        )
+
+        # Start PointTrackerThread
+        self._tracker_thread = PointTrackerThread(self._config, trigger_points)
+        self._tracker_thread.frame_ready.connect(self._video.set_frame)
+        self._tracker_thread.error_occurred.connect(self._on_error)
+        self._tracker_thread.point_triggered.connect(self._on_point_triggered)
+        self._tracker_thread.point_state_changed.connect(self._on_point_state_changed)
+        self._tracker_thread.hand_position_updated.connect(self._on_hand_position)
+        self._tracker_thread.start()
 
     def _stop_session(self) -> None:
-        if self._vision_thread:
-            self._vision_thread.stop()
-            self._vision_thread = None
+        if self._tracker_thread:
+            self._tracker_thread.stop()
+            self._tracker_thread = None
+        self._cycle_tracker = None
 
         if self._session_id:
             self._db.end_session(self._session_id)
@@ -338,8 +356,76 @@ class MonitorScreen(QWidget):
             self._total, self._pass, self._fail, self._seq_err, avg
         )
 
+    # ------------------------------------------------------------------
+    # PointTrackerThread signal handlers
+    # ------------------------------------------------------------------
+
+    def _on_point_triggered(self, point_id: int, timestamp: float,
+                            hand_x: float, hand_y: float) -> None:
+        """Relay point trigger → CycleTracker as zone 'enter' event."""
+        if self._cycle_tracker:
+            self._cycle_tracker.on_zone_event(point_id, "enter")
+            self._cycle_tracker.tick(hand_x, hand_y)
+
+    def _on_point_state_changed(self, point_id: int, state_name: str) -> None:
+        """Update state HUD with point + state name."""
+        self._lbl_state.setText(f"P{point_id}:{state_name}")
+        armed_states = {"ARMED", "TRIGGERED_PENDING", "ACTIVE"}
+        color = "#00c853" if state_name in armed_states else "#607d8b"
+        self._lbl_state.setStyleSheet(
+            f"color: {color}; font-family: Consolas; font-size: 9px;"
+        )
+
+    def _on_hand_position(self, hand_x: float, hand_y: float) -> None:
+        """Forward hand position to CycleTracker for real-time stats."""
+        if self._cycle_tracker:
+            self._cycle_tracker.tick(hand_x, hand_y)
+
+    # ------------------------------------------------------------------
+    # CycleTracker callbacks (called from tracker thread — queued)
+    # ------------------------------------------------------------------
+
+    def _cb_cycle_complete(self, record: CycleRecord) -> None:
+        """Convert CycleRecord → dict and call the existing handler."""
+        record_dict = {
+            "cycle_number":    record.cycle_number,
+            "total_time":      record.total_time,
+            "status":          record.status,
+            "zone_times":      record.zone_times_dict(),
+            "sequence_errors": record.sequence_errors,
+            "trajectory":      record.trajectory,
+            "start_time":      record.start_time,
+            "end_time":        record.end_time,
+        }
+        self._on_cycle_complete(record_dict)
+
+    def _cb_alert(self, zone_id: int, message: str) -> None:
+        self._on_alert({"message": message, "level": "WARNING", "zone_id": zone_id})
+
+    def _cb_sequence_error(self, expected: int, actual: int) -> None:
+        msg = f"Sequence error: expected Point {expected}, got Point {actual}"
+        self._on_alert({"message": msg, "level": "CRITICAL"})
+
+    def _cb_state_change(self, state) -> None:
+        """Update progress bar from CycleTracker state."""
+        from core.cycle_tracker import CycleState
+        state_name = state.name if hasattr(state, "name") else str(state)
+        colors = {
+            "IDLE":          "#607d8b",
+            "ZONE_1_ACTIVE": "#1565c0",
+            "TRANSIT_1_2":   "#37474f",
+            "ZONE_2_ACTIVE": "#00838f",
+            "TRANSIT_2_3":   "#37474f",
+            "ZONE_3_ACTIVE": "#558b2f",
+            "COMPLETED":     "#00c853",
+        }
+        self._lbl_state.setStyleSheet(
+            f"color: {colors.get(state_name, '#eceff1')}; "
+            "font-family: Consolas; font-size: 9px;"
+        )
+
     def _on_state_changed(self, state_name: str) -> None:
-        self._lbl_state.setText(state_name)
+        """Legacy-compatible handler kept for internal use."""
         colors = {
             "IDLE":          "#607d8b",
             "ZONE_1_ACTIVE": "#1565c0",
@@ -363,7 +449,7 @@ class MonitorScreen(QWidget):
         self._zone_panel.update_stats(stats)
         prog = int(stats.get("cycle_progress", 0))
         self._progress_bar.setValue(prog)
-        n = stats.get("cycle_number", 0)
+        n = stats.get("cycle_number", self._cycle_number)
         self._lbl_cycle_num.setText(f"Cycle #{n}")
 
     def _on_error(self, msg: str) -> None:
@@ -394,3 +480,52 @@ class MonitorScreen(QWidget):
             }}
             QPushButton:hover {{ border-color: #00bcd4; }}
         """
+
+
+# ---------------------------------------------------------------------------
+# Module-level helper — polygon centroid adapter
+# ---------------------------------------------------------------------------
+
+def _trigger_points_from_config(config: ConfigHandler) -> list[TriggerPoint]:
+    """Convert zone polygon config → TriggerPoint list.
+
+    Each zone's centroid becomes (x, y) and half of the bounding-box
+    short-axis becomes the radius.  Works for both old polygon configs and
+    any future point-based zone that already has x/y/radius keys.
+    """
+    points: list[TriggerPoint] = []
+    for zone in config.get_zones():
+        zid  = zone.get("id", 0)
+        name = zone.get("name", f"Point {zid}")
+
+        # New-style: zone already has x, y, radius
+        if "x" in zone and "y" in zone:
+            points.append(TriggerPoint(
+                point_id = zid,
+                name     = name,
+                x        = float(zone["x"]),
+                y        = float(zone["y"]),
+                radius   = float(zone.get("radius", 30)),
+            ))
+            continue
+
+        # Old-style: derive centroid from polygon
+        poly = zone.get("polygon", [])
+        if not poly:
+            continue
+        xs = [p[0] for p in poly]
+        ys = [p[1] for p in poly]
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
+        # radius = half of min(width, height) of bounding box
+        w = max(xs) - min(xs)
+        h = max(ys) - min(ys)
+        radius = max(20.0, min(w, h) / 2.0)
+        points.append(TriggerPoint(
+            point_id = zid,
+            name     = name,
+            x        = cx,
+            y        = cy,
+            radius   = radius,
+        ))
+    return points

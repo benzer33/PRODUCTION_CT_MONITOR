@@ -31,7 +31,6 @@
     <Compile Include="ai_production_monitor\core\dtw_comparator.py" />
     <Compile Include="ai_production_monitor\core\point_trigger_detector.py" />
     <Compile Include="ai_production_monitor\core\sequence_checker.py" />
-    <Compile Include="ai_production_monitor\core\zone_detector.py" />
     <Compile Include="ai_production_monitor\core\__init__.py" />
     <Compile Include="ai_production_monitor\data\config_handler.py" />
     <Compile Include="ai_production_monitor\data\database.py" />
@@ -57,7 +56,6 @@
     <Compile Include="ai_production_monitor\vision\camera_handler.py" />
     <Compile Include="ai_production_monitor\vision\hand_tracker.py" />
     <Compile Include="ai_production_monitor\vision\point_tracker_thread.py" />
-    <Compile Include="ai_production_monitor\vision\vision_thread.py" />
     <Compile Include="ai_production_monitor\vision\__init__.py" />
     <Compile Include="ai_production_monitor\__init__.py" />
     <Compile Include="PRODUCTION_CT_MONITOR.py" />

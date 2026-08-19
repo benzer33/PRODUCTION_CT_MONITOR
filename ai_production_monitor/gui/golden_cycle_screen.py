@@ -24,11 +24,12 @@ from PyQt5.QtWidgets import (
 )
 
 from core.dtw_comparator import GoldenCycleProcessor, GoldenReference
-from core.cycle_tracker import CycleRecord
+from core.cycle_tracker import CycleRecord, CycleTracker
+from core.point_trigger_detector import TriggerPoint
 from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
 from gui.widgets.video_widget import VideoWidget
-from vision.vision_thread import VisionThread
+from gui.monitor_screen import _trigger_points_from_config
 
 
 class CycleResultRow(QFrame):
@@ -89,7 +90,8 @@ class GoldenCycleScreen(QWidget):
         super().__init__(parent)
         self._config = config
         self._db     = db
-        self._vision_thread: VisionThread | None = None
+        self._tracker_thread: PointTrackerThread | None = None
+        self._cycle_tracker:  CycleTracker | None = None
         self._recorded_cycles: list[dict] = []
         self._golden_ref: GoldenReference | None = None
 
@@ -248,24 +250,36 @@ class GoldenCycleScreen(QWidget):
 
     def _start_recording(self) -> None:
         self._recorded_cycles = []
-        self._vision_thread = VisionThread(self._config)
-        self._vision_thread.set_mode(VisionThread.MODE_GOLDEN)
-        self._vision_thread.frame_ready.connect(self._video.set_frame)
-        self._vision_thread.cycle_complete.connect(self._on_cycle_complete)
-        self._vision_thread.state_changed.connect(self._on_state_changed)
-        self._vision_thread.alert_fired.connect(self._on_alert)
-        self._vision_thread.stats_updated.connect(self._on_stats)
-        self._vision_thread.start()
+
+        # Build trigger points from config (polygon centroid adapter)
+        trigger_points = _trigger_points_from_config(self._config)
+        zone_ids = [tp.point_id for tp in trigger_points]
+
+        self._cycle_tracker = CycleTracker(
+            zone_ids          = zone_ids,
+            on_cycle_complete = self._cb_cycle_complete,
+            on_alert          = self._cb_alert,
+            on_state_change   = self._cb_state_change,
+        )
+
+        from vision.point_tracker_thread import PointTrackerThread
+        self._tracker_thread = PointTrackerThread(self._config, trigger_points)
+        self._tracker_thread.frame_ready.connect(self._video.set_frame)
+        self._tracker_thread.error_occurred.connect(self._on_error)
+        self._tracker_thread.point_triggered.connect(self._on_point_triggered)
+        self._tracker_thread.point_state_changed.connect(self._on_point_state_changed)
+        self._tracker_thread.hand_position_updated.connect(self._on_hand_position)
+        self._tracker_thread.start()
 
         self._btn_start.setEnabled(False)
         self._btn_stop.setEnabled(True)
         self._btn_compute.setEnabled(False)
 
     def _stop_recording(self) -> None:
-        if self._vision_thread:
-            raw_records = self._vision_thread.get_recorded_cycles()
-            self._vision_thread.stop()
-            self._vision_thread = None
+        if self._tracker_thread:
+            self._tracker_thread.stop()
+            self._tracker_thread = None
+        self._cycle_tracker = None
 
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
@@ -353,6 +367,53 @@ class GoldenCycleScreen(QWidget):
         self.recording_done.emit()
 
     # ------------------------------------------------------------------
+    # PointTrackerThread signal handlers
+    # ------------------------------------------------------------------
+
+    def _on_point_triggered(self, point_id: int, timestamp: float,
+                            hand_x: float, hand_y: float) -> None:
+        if self._cycle_tracker:
+            self._cycle_tracker.on_zone_event(point_id, "enter")
+            self._cycle_tracker.tick(hand_x, hand_y)
+
+    def _on_point_state_changed(self, point_id: int, state_name: str) -> None:
+        self._lbl_state.setText(f"STATE: P{point_id}:{state_name}")
+
+    def _on_hand_position(self, hand_x: float, hand_y: float) -> None:
+        if self._cycle_tracker:
+            self._cycle_tracker.tick(hand_x, hand_y)
+
+    def _on_error(self, msg: str) -> None:
+        self._lbl_alert.setText(f"⚠ ERROR: {msg}")
+        self._lbl_alert.show()
+        QTimer.singleShot(5000, self._lbl_alert.hide)
+
+    # ------------------------------------------------------------------
+    # CycleTracker callbacks
+    # ------------------------------------------------------------------
+
+    def _cb_cycle_complete(self, record: CycleRecord) -> None:
+        record_dict = {
+            "cycle_number":    record.cycle_number,
+            "total_time":      record.total_time,
+            "status":          record.status,
+            "zone_times":      record.zone_times_dict(),
+            "sequence_errors": record.sequence_errors,
+            "trajectory":      record.trajectory,
+            "start_time":      record.start_time,
+            "end_time":        record.end_time,
+        }
+        self._on_cycle_complete(record_dict)
+
+    def _cb_alert(self, zone_id: int, message: str) -> None:
+        self._on_alert({"message": message, "level": "WARNING"})
+
+    def _cb_state_change(self, state) -> None:
+        state_name = state.name if hasattr(state, "name") else str(state)
+        elapsed_hint = 0.0
+        self._on_stats({"cycle_elapsed": elapsed_hint, "state": state_name})
+
+    # ------------------------------------------------------------------
     # Signal handlers
     # ------------------------------------------------------------------
 
@@ -378,19 +439,6 @@ class GoldenCycleScreen(QWidget):
 
         if n >= self._max_cycles:
             self._stop_recording()
-
-    def _on_state_changed(self, state_name: str) -> None:
-        self._lbl_state.setText(f"STATE: {state_name}")
-        colors = {
-            "IDLE":          "#607d8b",
-            "ZONE_1_ACTIVE": "#1565c0",
-            "ZONE_2_ACTIVE": "#00838f",
-            "ZONE_3_ACTIVE": "#558b2f",
-            "COMPLETED":     "#00c853",
-        }
-        self._lbl_state.setStyleSheet(
-            f"color: {colors.get(state_name, '#eceff1')};"
-        )
 
     def _on_alert(self, alert: dict) -> None:
         msg = alert.get("message", "")
