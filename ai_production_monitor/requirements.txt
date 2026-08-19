@@ -1,0 +1,31 @@
+# AI Production Cycle Monitor — Dependencies
+# Python 3.11+
+
+# GUI
+PyQt5>=5.15.9
+PyQt5-sip>=12.12.0
+
+# Computer Vision
+opencv-python>=4.8.0
+mediapipe>=0.10.7
+
+# Scientific / Numerical
+numpy>=1.24.0
+scipy>=1.11.0
+
+# DTW (Dynamic Time Warping) — used for aligning cycles of different speeds
+fastdtw>=0.3.4
+
+# Data / ORM
+SQLAlchemy>=2.0.0
+
+# Charts — PyQtGraph for real-time, Matplotlib for summary
+pyqtgraph>=0.13.3
+matplotlib>=3.7.0
+
+# AI — Anthropic Claude
+anthropic>=0.25.0
+
+# Utilities
+python-dotenv>=1.0.0
+Pillow>=10.0.0

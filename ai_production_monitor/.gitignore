@@ -1,0 +1,16 @@
+# .gitignore for ai_production_monitor
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite
+logs/*.db
+logs/*.log
+.env
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+*.DS_Store

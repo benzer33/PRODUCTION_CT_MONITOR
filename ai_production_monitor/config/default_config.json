@@ -1,0 +1,74 @@
+{
+  "app_version": "1.0.0",
+  "anthropic_api_key": "YOUR_API_KEY_HERE",
+  "anthropic_model": "claude-sonnet-4-5",
+  "stations": {
+    "station_01": {
+      "name": "Assembly Line 1",
+      "camera": {
+        "type": "webcam",
+        "device_index": 0,
+        "url": "",
+        "width": 1280,
+        "height": 720,
+        "fps": 30
+      },
+      "zones": [
+        {
+          "id": 1,
+          "name": "Zone 1 — Pick Part A",
+          "color": [
+            0,
+            120,
+            255
+          ],
+          "polygon": []
+        },
+        {
+          "id": 2,
+          "name": "Zone 2 — Pick Part B",
+          "color": [
+            0,
+            220,
+            100
+          ],
+          "polygon": []
+        },
+        {
+          "id": 3,
+          "name": "Zone 3 — Assemble & Store",
+          "color": [
+            220,
+            80,
+            0
+          ],
+          "polygon": []
+        }
+      ],
+      "golden_cycle": {
+        "recorded_cycles": [],
+        "standard_times": {},
+        "trajectory_points": []
+      },
+      "alert_threshold_percent": 30,
+      "min_golden_cycles": 3,
+      "max_golden_cycles": 5
+    }
+  },
+  "active_station": "station_01",
+  "ui": {
+    "theme": "dark_industrial",
+    "ghost_color": [
+      0,
+      255,
+      80
+    ],
+    "ghost_alpha": 0.45,
+    "alert_color": [
+      255,
+      40,
+      40
+    ],
+    "font_family": "Consolas"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "type": "webcam",
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "reconnect_on_failure": true,
+  "device_index": 0,
+  "url": "",
+  "username": "",
+  "password": ""
+}
