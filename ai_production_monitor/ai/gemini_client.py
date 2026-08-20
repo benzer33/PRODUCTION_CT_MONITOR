@@ -14,10 +14,9 @@ google-generativeai package.
 
 Model choice
 ------------
-Default: gemini-2.0-flash
-  • Stable, non-preview Flash tier (verified from ai.google.dev/gemini-api/docs)
-  • Fast and inexpensive — suitable for plain-text statistics summarisation
-  • Fallback option: gemini-2.0-flash-lite  (even lighter, lower cost)
+Default: gemini-2.5-flash
+  • Fast and capable — suitable for plain-text statistics summarisation
+  • Fallback option: gemini-2.0-flash  (previous stable version)
 
 API key
 -------
@@ -67,8 +66,8 @@ class GeminiAnalyser:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gemini-2.0-flash",
-        max_tokens: int = 1024,
+        model: str = "gemini-3.5-flash",
+        max_tokens: int = 8192,
         timeout: float = 60.0,
     ) -> None:
         try:
@@ -168,13 +167,39 @@ class GeminiAnalyser:
         try:
             from google.genai import types as _types
 
+            # Build generation config:
+            # - thinking_config: budget=0 disables chain-of-thought reasoning
+            #   (not needed for stats summarisation; saves output token quota)
+            # - max_output_tokens: raised to 8192 so responses are never cut short
+            try:
+                gen_config = _types.GenerateContentConfig(
+                    max_output_tokens = self._max_tokens,
+                    thinking_config   = _types.ThinkingConfig(thinking_budget=0),
+                )
+            except (AttributeError, TypeError):
+                # Older SDK versions may not have ThinkingConfig — fall back gracefully
+                gen_config = _types.GenerateContentConfig(
+                    max_output_tokens = self._max_tokens,
+                )
+
             response = self._client.models.generate_content(
                 model    = self._model,
                 contents = prompt,
-                config   = _types.GenerateContentConfig(
-                    max_output_tokens = self._max_tokens,
-                ),
+                config   = gen_config,
             )
+
+            # Log finish_reason so we can diagnose truncation
+            try:
+                candidate    = response.candidates[0]
+                finish_reason = candidate.finish_reason
+                print(f"[Gemini] finish_reason={finish_reason}  "
+                      f"model={self._model}  max_tokens={self._max_tokens}")
+                if str(finish_reason) in ("MAX_TOKENS", "2"):
+                    print("[Gemini] WARNING: response was cut off by MAX_TOKENS — "
+                          "consider increasing max_tokens further")
+            except Exception:
+                pass  # non-critical
+
             return response.text
 
         except Exception as exc:
@@ -238,7 +263,7 @@ class AnalysisWorker(QThread):
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-2.0-flash",
+        model: str = "gemini-3.5-flash",
         # Mode A — session_data dict (AI Summary Screen)
         session_data: dict | None = None,
         # Mode B — legacy individual fields (older callers)
