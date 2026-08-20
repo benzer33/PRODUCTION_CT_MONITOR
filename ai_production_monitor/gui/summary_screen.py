@@ -37,6 +37,13 @@ from PyQt5.QtWidgets import (
 from ai.gemini_client import AnalysisWorker
 from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
+from gui.theme import (
+    FONT_FAMILY, FONT_SIZE_AI_TEXT, FONT_SIZE_BODY, FONT_SIZE_CAPTION,
+    FONT_SIZE_LABEL, FONT_SIZE_METRIC, FONT_SIZE_SECTION, FONT_SIZE_TITLE,
+    make_font,
+    btn_stylesheet,
+    CLR_MUTED,
+)
 
 # ── PyQtGraph dark theme ─────────────────────────────────────────────────────
 pg.setConfigOption("background", "#0d1b2a")
@@ -67,10 +74,10 @@ def _stat_card(title: str, value: str, color: str = _CLR_TEXT) -> QFrame:
     lay.setContentsMargins(10, 6, 10, 6)
     lay.setSpacing(2)
     lbl_t = QLabel(title)
-    lbl_t.setFont(QFont("Consolas", 8))
+    lbl_t.setFont(make_font(FONT_SIZE_LABEL))
     lbl_t.setStyleSheet(f"color:{_CLR_SUBTEXT}; border:none; background:transparent;")
     lbl_v = QLabel(value)
-    lbl_v.setFont(QFont("Consolas", 16, QFont.Bold))
+    lbl_v.setFont(make_font(FONT_SIZE_METRIC, bold=True))
     lbl_v.setStyleSheet(f"color:{color}; border:none; background:transparent;")
     lay.addWidget(lbl_t)
     lay.addWidget(lbl_v)
@@ -291,7 +298,7 @@ class SummaryScreen(QWidget):
         # ── Header ────────────────────────────────────────────────────
         hdr = QHBoxLayout()
         title = QLabel("📊  AI Summary — สรุปผลการผลิต")
-        title.setFont(QFont("Consolas", 14, QFont.Bold))
+        title.setFont(make_font(FONT_SIZE_TITLE, bold=True))
         title.setStyleSheet("color:#00bcd4;")
         hdr.addWidget(title)
         hdr.addStretch()
@@ -299,7 +306,7 @@ class SummaryScreen(QWidget):
         self._btn_back = QPushButton("◀  กลับไป Monitor")
         self._btn_back.setFixedHeight(36)
         self._btn_back.setStyleSheet(
-            "QPushButton{background:#1565c0;color:#fff;border-radius:4px;font-size:11px;}"
+            f"QPushButton{{background:#1565c0;color:#fff;border-radius:4px;font-size:{FONT_SIZE_BODY}px;}}"
             "QPushButton:hover{background:#1976d2;}"
         )
         self._btn_back.clicked.connect(self.back_to_monitor)
@@ -352,23 +359,25 @@ class SummaryScreen(QWidget):
 
         ai_header = QHBoxLayout()
         ai_title = QLabel("🤖  AI Analysis (Claude)")
-        ai_title.setFont(QFont("Consolas", 10, QFont.Bold))
+        ai_title.setFont(make_font(FONT_SIZE_SECTION, bold=True))
         ai_title.setStyleSheet("color:#00bcd4;")
         ai_header.addWidget(ai_title)
         ai_header.addStretch()
 
         self._ai_status_lbl = QLabel("กำลังวิเคราะห์...")
-        self._ai_status_lbl.setFont(QFont("Consolas", 8))
+        self._ai_status_lbl.setFont(make_font(FONT_SIZE_CAPTION))
         self._ai_status_lbl.setStyleSheet(f"color:{_CLR_SUBTEXT};")
         ai_header.addWidget(self._ai_status_lbl)
         ai_lay.addLayout(ai_header)
 
         self._ai_text = QTextEdit()
         self._ai_text.setReadOnly(True)
+        self._ai_text.setWordWrapMode(1)   # WrapAtWordBoundaryOrAnywhere
+        self._ai_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._ai_text.setStyleSheet(
             f"background:{_CLR_CARD}; color:{_CLR_TEXT}; "
             "border:1px solid #152840; border-radius:4px; "
-            "font-family:Consolas; font-size:12px; line-height:1.5;"
+            f"font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_AI_TEXT}px; line-height:1.6;"
         )
         self._ai_text.setPlaceholderText("AI กำลังประมวลผล...")
         ai_lay.addWidget(self._ai_text)

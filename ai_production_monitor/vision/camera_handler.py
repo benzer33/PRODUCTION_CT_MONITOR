@@ -36,6 +36,7 @@ Usage example
 
 from __future__ import annotations
 
+import logging
 import platform
 import re
 import threading
@@ -47,6 +48,8 @@ from typing import Optional
 
 import cv2
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -668,17 +671,44 @@ class CameraManager:
     def read(self) -> tuple[bool, Optional[np.ndarray]]:
         """Read one frame.  Auto-reconnects after sustained failure."""
         if not self.is_open():
+            cap_opened = self._cap.isOpened() if self._cap is not None else False
+            _log.warning(
+                "[CameraManager.read] not open — _is_open=%s cap.isOpened()=%s reconnect=%s",
+                self._is_open, cap_opened, self._reconnect,
+            )
             if self._reconnect:
                 return self._try_reconnect()
             return False, None
 
         try:
             ok, frame = self._cap.read()
-        except Exception:
+        except Exception as exc:
+            _log.error(
+                "[CameraManager.read] cap.read() raised %s: %s — cap.isOpened()=%s",
+                type(exc).__name__, exc, self._cap.isOpened(),
+            )
             ok, frame = False, None
 
         if not ok or frame is None:
             self._fail_count += 1
+            # Log the actual negotiated properties to help diagnose mismatch
+            try:
+                act_w   = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                act_h   = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                act_fps = self._cap.get(cv2.CAP_PROP_FPS)
+                cap_ok  = self._cap.isOpened()
+            except Exception:
+                act_w = act_h = 0
+                act_fps = 0.0
+                cap_ok = False
+            _log.warning(
+                "[CameraManager.read] frame fail #%d — ok=%s frame=%s "
+                "cap.isOpened()=%s negotiated=%dx%d@%.1ffps requested=%dx%d@%.0ffps src=%s",
+                self._fail_count, ok, frame is not None,
+                cap_ok, act_w, act_h, act_fps,
+                self.width, self.height, self.fps,
+                self._source.description(),
+            )
             # Only attempt full reconnect after several consecutive failures
             # so a single dropped frame does not stall the loop for 0.5s
             if self._reconnect and self._fail_count >= _FAIL_BEFORE_RECONNECT:
@@ -760,18 +790,49 @@ class CameraManager:
         return CameraErrorCode.CONNECTION_TIMEOUT
 
     def _try_reconnect(self) -> tuple[bool, Optional[np.ndarray]]:
+        _log.info(
+            "[CameraManager._try_reconnect] attempting reconnect — src=%s fail_count=%d",
+            self._source.description(), self._fail_count,
+        )
         self.release()
         time.sleep(_RECONNECT_DELAY)
         try:
             result = self.open()
-        except Exception:
+        except Exception as exc:
+            _log.error(
+                "[CameraManager._try_reconnect] open() raised %s: %s",
+                type(exc).__name__, exc,
+            )
             return False, None
         if result.success and self._cap:
+            _log.info(
+                "[CameraManager._try_reconnect] reconnected — negotiated=%dx%d@%.1ffps "
+                "(requested=%dx%d@%.0ffps)",
+                result.actual_width, result.actual_height, result.actual_fps,
+                self.width, self.height, self.fps,
+            )
+            if (result.actual_width != self.width or result.actual_height != self.height
+                    or abs(result.actual_fps - self.fps) > 2):
+                _log.warning(
+                    "[CameraManager._try_reconnect] resolution/fps MISMATCH — "
+                    "requested %dx%d@%.0ffps but got %dx%d@%.1ffps. "
+                    "This is a common cause of repeated read() failures.",
+                    self.width, self.height, self.fps,
+                    result.actual_width, result.actual_height, result.actual_fps,
+                )
             try:
                 ok, frame = self._cap.read()
-            except Exception:
+            except Exception as exc:
+                _log.error(
+                    "[CameraManager._try_reconnect] first read() after reconnect raised %s: %s",
+                    type(exc).__name__, exc,
+                )
                 return False, None
             return (True, frame) if ok else (False, None)
+        _log.warning(
+            "[CameraManager._try_reconnect] reconnect failed — %s",
+            result.message if result else "unknown",
+        )
         return False, None
 
     def __repr__(self) -> str:

@@ -34,6 +34,13 @@ from core.dtw_comparator import GoldenReference
 from core.point_trigger_detector import TriggerPoint
 from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
+from gui.theme import (
+    FONT_FAMILY, FONT_SIZE_BODY, FONT_SIZE_CAPTION, FONT_SIZE_LABEL,
+    FONT_SIZE_METRIC, FONT_SIZE_SECTION, FONT_SIZE_STATUS, FONT_SIZE_TITLE,
+    make_font,
+    btn_stylesheet,
+    CLR_ACCENT, CLR_MUTED,
+)
 from gui.widgets.video_widget import VideoWidget
 from gui.widgets.zone_widget import ZonePanel
 from vision.point_tracker_thread import PointTrackerThread
@@ -48,7 +55,7 @@ class AlertTicker(QLabel):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setFont(QFont("Consolas", 10, QFont.Bold))
+        self.setFont(make_font(FONT_SIZE_BODY, bold=True))
         self.setAlignment(Qt.AlignCenter)
         self.setFixedHeight(30)
         self._hide_timer = QTimer(self)
@@ -85,7 +92,7 @@ class CycleSummaryCard(QGroupBox):
             QGroupBox {
                 color: #607d8b; border: 1px solid #263238;
                 border-radius: 4px; margin-top: 8px;
-                font-family: Consolas; font-size: 9px;
+                f"font-family: {FONT_FAMILY}; font-size: {FONT_SIZE_BODY}px;"
             }
             QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
         """)
@@ -101,10 +108,10 @@ class CycleSummaryCard(QGroupBox):
         ]:
             row = QHBoxLayout()
             lbl_k = QLabel(display + ":")
-            lbl_k.setFont(QFont("Consolas", 8))
+            lbl_k.setFont(make_font(FONT_SIZE_LABEL))
             lbl_k.setStyleSheet("color: #607d8b;")
             lbl_v = QLabel("—")
-            lbl_v.setFont(QFont("Consolas", 9, QFont.Bold))
+            lbl_v.setFont(make_font(FONT_SIZE_BODY, bold=True))
             lbl_v.setStyleSheet("color: #eceff1;")
             row.addWidget(lbl_k)
             row.addStretch()
@@ -120,12 +127,12 @@ class CycleSummaryCard(QGroupBox):
         self._labels["total"].setText(str(total))
         self._labels["pass"].setText(str(passed))
         self._labels["pass"].setStyleSheet(
-            "color: #00c853; font-family: Consolas; font-size: 9px; font-weight: bold;"
+            f"color: #00c853; font-family: {FONT_FAMILY}; font-size: {FONT_SIZE_BODY}px; font-weight: bold;"
         )
         self._labels["fail"].setText(str(failed))
         self._labels["fail"].setStyleSheet(
             f"color: {'#d50000' if failed else '#eceff1'}; "
-            "font-family: Consolas; font-size: 9px; font-weight: bold;"
+            f"font-family: {FONT_FAMILY}; font-size: {FONT_SIZE_BODY}px; font-weight: bold;"
         )
         self._labels["seq_err"].setText(str(seq_errors))
         self._labels["avg"].setText(f"{avg_time:.2f}s" if avg_time else "—")
@@ -179,13 +186,13 @@ class MonitorScreen(QWidget):
         # Header
         hdr = QHBoxLayout()
         self._lbl_title = QLabel("🏭  LIVE PRODUCTION MONITOR")
-        self._lbl_title.setFont(QFont("Consolas", 14, QFont.Bold))
+        self._lbl_title.setFont(make_font(FONT_SIZE_TITLE, bold=True))
         self._lbl_title.setStyleSheet("color: #00bcd4;")
         hdr.addWidget(self._lbl_title)
         hdr.addStretch()
 
         self._lbl_session = QLabel("Session: —")
-        self._lbl_session.setFont(QFont("Consolas", 9))
+        self._lbl_session.setFont(make_font(FONT_SIZE_LABEL))
         self._lbl_session.setStyleSheet("color: #607d8b;")
         hdr.addWidget(self._lbl_session)
         root.addLayout(hdr)
@@ -203,7 +210,7 @@ class MonitorScreen(QWidget):
         # Progress bar (cycle %)
         prog_row = QHBoxLayout()
         self._lbl_cycle_num = QLabel("Cycle #0")
-        self._lbl_cycle_num.setFont(QFont("Consolas", 9, QFont.Bold))
+        self._lbl_cycle_num.setFont(make_font(FONT_SIZE_BODY, bold=True))
         self._lbl_cycle_num.setStyleSheet("color: #00bcd4;")
         self._progress_bar = QProgressBar()
         self._progress_bar.setRange(0, 100)
@@ -215,8 +222,8 @@ class MonitorScreen(QWidget):
             QProgressBar::chunk { background:#1565c0; border-radius:4px; }
         """)
         self._lbl_state = QLabel("IDLE")
-        self._lbl_state.setFont(QFont("Consolas", 9))
-        self._lbl_state.setStyleSheet("color: #607d8b;")
+        self._lbl_state.setFont(make_font(FONT_SIZE_STATUS, bold=True))
+        self._lbl_state.setStyleSheet(f"color: {CLR_MUTED};")
         prog_row.addWidget(self._lbl_cycle_num)
         prog_row.addWidget(self._progress_bar, 1)
         prog_row.addWidget(self._lbl_state)
@@ -393,7 +400,7 @@ class MonitorScreen(QWidget):
         armed_states = {"ARMED", "TRIGGERED_PENDING", "ACTIVE"}
         color = "#00c853" if state_name in armed_states else "#607d8b"
         self._lbl_state.setStyleSheet(
-            f"color: {color}; font-family: Consolas; font-size: 9px;"
+            f"color: {color}; font-family: {FONT_FAMILY}; font-size: {FONT_SIZE_STATUS}px; font-weight: bold;"
         )
 
     def _on_hand_position(self, hand_x: float, hand_y: float) -> None:
@@ -441,7 +448,7 @@ class MonitorScreen(QWidget):
         }
         self._lbl_state.setStyleSheet(
             f"color: {colors.get(state_name, '#eceff1')}; "
-            "font-family: Consolas; font-size: 9px;"
+            f"font-family: {FONT_FAMILY}; font-size: {FONT_SIZE_STATUS}px; font-weight: bold;"
         )
 
     def _on_state_changed(self, state_name: str) -> None:
@@ -457,7 +464,7 @@ class MonitorScreen(QWidget):
         }
         self._lbl_state.setStyleSheet(
             f"color: {colors.get(state_name, '#eceff1')}; "
-            "font-family: Consolas; font-size: 9px;"
+            f"font-family: {FONT_FAMILY}; font-size: {FONT_SIZE_STATUS}px; font-weight: bold;"
         )
 
     def _on_alert(self, alert: dict) -> None:
@@ -488,18 +495,7 @@ class MonitorScreen(QWidget):
 
     @staticmethod
     def _btn_style(accent="#263238") -> str:
-        return f"""
-            QPushButton {{
-                background-color: {accent};
-                color: #eceff1;
-                border: 1px solid #455a64;
-                border-radius: 4px;
-                padding: 6px;
-                font-family: Consolas;
-                font-size: 10px;
-            }}
-            QPushButton:hover {{ border-color: #00bcd4; }}
-        """
+        return btn_stylesheet(accent)
 
 
 # ---------------------------------------------------------------------------

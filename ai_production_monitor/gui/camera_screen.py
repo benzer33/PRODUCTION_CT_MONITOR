@@ -56,6 +56,13 @@ from PyQt5.QtWidgets import (
 )
 
 from data.config_handler import ConfigHandler
+from gui.theme import (
+    FONT_FAMILY, FONT_SIZE_BODY, FONT_SIZE_CAPTION, FONT_SIZE_ICON,
+    FONT_SIZE_LABEL, FONT_SIZE_SECTION, FONT_SIZE_TITLE,
+    make_font,
+    btn_stylesheet, groupbox_stylesheet, input_stylesheet,
+    CLR_ACCENT, CLR_MUTED, CLR_SECTION_HDR, CLR_TEXT,
+)
 from gui.widgets.video_widget import VideoWidget
 from vision.camera_handler import (
     CameraConnectionResult,
@@ -144,7 +151,7 @@ class _WebcamPanel(QFrame):
 
         # Scan status
         self.lbl_scan_status = QLabel("Click ⟳ to detect cameras")
-        self.lbl_scan_status.setFont(QFont("Consolas", 8))
+        self.lbl_scan_status.setFont(make_font(FONT_SIZE_CAPTION))
         self.lbl_scan_status.setStyleSheet("color: #546e7a;")
         layout.addRow("", self.lbl_scan_status)
 
@@ -248,7 +255,7 @@ class _NetworkPanel(QFrame):
             "e.g.  http://192.168.1.100:8080/video?channel=1"
         )
         hint = QLabel(hint_text)
-        hint.setFont(QFont("Consolas", 8))
+        hint.setFont(make_font(FONT_SIZE_CAPTION))
         hint.setStyleSheet("color: #455a64; font-style: italic;")
         hint.setWordWrap(True)
         layout.addRow("", hint)
@@ -299,11 +306,11 @@ class _TestResultWidget(QFrame):
         layout.setSpacing(6)
 
         self._lbl_icon = QLabel("")
-        self._lbl_icon.setFont(QFont("Consolas", 22))
+        self._lbl_icon.setFont(make_font(FONT_SIZE_ICON))
         self._lbl_icon.setAlignment(Qt.AlignCenter)
 
         self._lbl_msg = QLabel("Press  ⚡ Test Connection  to verify")
-        self._lbl_msg.setFont(QFont("Consolas", 9))
+        self._lbl_msg.setFont(make_font(FONT_SIZE_BODY))
         self._lbl_msg.setStyleSheet("color: #546e7a;")
         self._lbl_msg.setWordWrap(True)
 
@@ -320,7 +327,7 @@ class _TestResultWidget(QFrame):
             self._lbl_icon.setText("✔")
             self._lbl_icon.setStyleSheet("color: #00c853;")
             self._lbl_msg.setStyleSheet(
-                "color: #00c853; font-family:Consolas; font-size:9px;"
+                f"color: #00c853; font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_BODY}px;"
             )
             self._lbl_msg.setText(result.message)
             if result.frame is not None:
@@ -329,7 +336,7 @@ class _TestResultWidget(QFrame):
             self._lbl_icon.setText("✖")
             self._lbl_icon.setStyleSheet("color: #d50000;")
             self._lbl_msg.setStyleSheet(
-                "color: #ef9a9a; font-family:Consolas; font-size:9px;"
+                f"color: #ef9a9a; font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_BODY}px;"
             )
             self._lbl_msg.setText(result.message)
             self._snapshot.hide()
@@ -337,7 +344,7 @@ class _TestResultWidget(QFrame):
     def show_testing(self) -> None:
         self._lbl_icon.setText("…")
         self._lbl_icon.setStyleSheet("color: #ffab00;")
-        self._lbl_msg.setStyleSheet("color: #ffab00; font-family:Consolas; font-size:9px;")
+        self._lbl_msg.setStyleSheet(f"color: #ffab00; font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_BODY}px;")
         self._lbl_msg.setText("กำลังทดสอบการเชื่อมต่อ…  (Testing connection…)")
         self._snapshot.hide()
 
@@ -421,13 +428,13 @@ class CameraScreen(QWidget):
     def _build_header(self) -> QHBoxLayout:
         row = QHBoxLayout()
         title = QLabel("📷  CAMERA MANAGEMENT")
-        title.setFont(QFont("Consolas", 14, QFont.Bold))
+        title.setFont(make_font(FONT_SIZE_TITLE, bold=True))
         title.setStyleSheet("color: #00bcd4;")
         row.addWidget(title)
         row.addStretch()
 
         self._lbl_source_desc = QLabel("")
-        self._lbl_source_desc.setFont(QFont("Consolas", 9))
+        self._lbl_source_desc.setFont(make_font(FONT_SIZE_BODY))
         self._lbl_source_desc.setStyleSheet("color: #455a64;")
         row.addWidget(self._lbl_source_desc)
 
@@ -455,7 +462,7 @@ class CameraScreen(QWidget):
         for label, key in _CAM_TYPES:
             self._combo_type.addItem(label, key)
         self._combo_type.setStyleSheet(_INPUT_STYLE)
-        self._combo_type.setFont(QFont("Consolas", 9))
+        self._combo_type.setFont(make_font(FONT_SIZE_BODY))
         self._combo_type.currentIndexChanged.connect(self._on_type_changed)
         type_lay.addWidget(self._combo_type)
         layout.addWidget(type_grp)
@@ -504,7 +511,7 @@ class CameraScreen(QWidget):
         # Reconnect on failure
         self._chk_reconnect = QCheckBox("Auto-reconnect on failure")
         self._chk_reconnect.setChecked(True)
-        self._chk_reconnect.setStyleSheet("color: #b0bec5; font-family:Consolas; font-size:9px;")
+        self._chk_reconnect.setStyleSheet(f"color: #b0bec5; font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_BODY}px;")
         cap_form.addRow("", self._chk_reconnect)
 
         layout.addWidget(cap_grp)
@@ -848,41 +855,22 @@ class CameraScreen(QWidget):
 # Style constants  (module-level for reuse across sub-widgets)
 # ============================================================================
 
-_INPUT_STYLE = """
-    QComboBox, QLineEdit, QSpinBox {
-        background-color: #152028;
-        color: #eceff1;
-        border: 1px solid #37474f;
-        border-radius: 3px;
-        padding: 3px 6px;
-        font-family: Consolas;
-        font-size: 9px;
-    }
-    QComboBox:focus, QLineEdit:focus, QSpinBox:focus {
-        border-color: #00bcd4;
-    }
-    QComboBox::drop-down { border: none; }
-    QComboBox QAbstractItemView {
-        background: #152028;
-        color: #eceff1;
-        selection-background-color: #1565c0;
-    }
-"""
+_INPUT_STYLE = input_stylesheet()
 
-_BTN_STYLE = """
-    QPushButton {
+_BTN_STYLE = f"""
+    QPushButton {{
         background-color: #263238;
         color: #b0bec5;
         border: 1px solid #455a64;
         border-radius: 3px;
         padding: 4px 8px;
-        font-family: Consolas;
-        font-size: 9px;
-    }
-    QPushButton:hover   { background-color: #37474f; border-color: #00bcd4; }
-    QPushButton:pressed { background-color: #0d1b2a; }
-    QPushButton:disabled { color: #37474f; }
-    QPushButton:checked { background-color: #1565c0; color: #fff; }
+        font-family: {FONT_FAMILY};
+        font-size: {FONT_SIZE_BODY}px;
+    }}
+    QPushButton:hover   {{ background-color: #37474f; border-color: {CLR_ACCENT}; }}
+    QPushButton:pressed {{ background-color: #0d1b2a; }}
+    QPushButton:disabled {{ color: #37474f; }}
+    QPushButton:checked {{ background-color: #1565c0; color: #fff; }}
 """
 
 
@@ -892,48 +880,20 @@ _BTN_STYLE = """
 
 def _make_btn(label: str, accent: str = "#263238") -> QPushButton:
     btn = QPushButton(label)
-    btn.setFont(QFont("Consolas", 9))
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {accent};
-            color: #eceff1;
-            border: 1px solid #455a64;
-            border-radius: 4px;
-            padding: 5px 12px;
-            font-family: Consolas;
-            font-size: 9px;
-        }}
-        QPushButton:hover   {{ background-color: #37474f; border-color: #00bcd4; }}
-        QPushButton:pressed {{ background-color: #0d1b2a; }}
-        QPushButton:disabled {{ color: #455a64; }}
-    """)
+    btn.setFont(make_font(FONT_SIZE_BODY))
+    btn.setStyleSheet(btn_stylesheet(accent))
     return btn
 
 
-def _lbl(text: str, size: int = 9) -> QLabel:
+def _lbl(text: str, size: int | None = None) -> QLabel:
     l = QLabel(text)
-    l.setFont(QFont("Consolas", size))
-    l.setStyleSheet("color: #607d8b; background: transparent; border: none;")
+    l.setFont(make_font(size if size is not None else FONT_SIZE_LABEL))
+    l.setStyleSheet(f"color: {CLR_MUTED}; background: transparent; border: none;")
     return l
 
 
 def _group(title: str) -> QGroupBox:
     g = QGroupBox(title)
-    g.setFont(QFont("Consolas", 9))
-    g.setStyleSheet("""
-        QGroupBox {
-            color: #546e7a;
-            border: 1px solid #263238;
-            border-radius: 4px;
-            margin-top: 10px;
-            font-family: Consolas;
-            font-size: 9px;
-            background: transparent;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 4px;
-        }
-    """)
+    g.setFont(make_font(FONT_SIZE_SECTION, bold=True))
+    g.setStyleSheet(groupbox_stylesheet())
     return g

@@ -49,6 +49,13 @@ from PyQt5.QtWidgets import (
 )
 
 from data.config_handler import ConfigHandler
+from gui.theme import (
+    FONT_FAMILY, FONT_SIZE_BODY, FONT_SIZE_CAPTION, FONT_SIZE_LABEL,
+    FONT_SIZE_SECTION, FONT_SIZE_TITLE,
+    make_font,
+    btn_stylesheet, groupbox_stylesheet,
+    CLR_ACCENT, CLR_MUTED,
+)
 from vision.camera_handler import CameraHandler
 
 
@@ -346,21 +353,21 @@ class ZoneCanvas(QLabel):
         painter.setPen(Qt.NoPen)
         painter.drawRect(wx1, wy1, badge_w, badge_h)
         painter.setPen(QPen(Qt.white))
-        painter.setFont(QFont("Consolas", 8, QFont.Bold))
+        painter.setFont(make_font(FONT_SIZE_CAPTION, bold=True))
         painter.drawText(QRect(wx1, wy1, badge_w, badge_h),
                          Qt.AlignCenter, str(zone.zone_id))
 
         # Zone name label below the top edge
         label_rect = QRect(wx1 + badge_w + 2, wy1, wx2 - wx1 - badge_w - 2, badge_h)
         painter.setPen(QPen(Qt.white))
-        painter.setFont(QFont("Consolas", 8))
+        painter.setFont(make_font(FONT_SIZE_CAPTION))
         painter.drawText(label_rect, Qt.AlignVCenter | Qt.AlignLeft,
                          f" {zone.name}")
 
         # Dimension tooltip (bottom-right corner, shown on hover)
         if hovered:
             dim_text = f"{zone.width()}×{zone.height()}px"
-            painter.setFont(QFont("Consolas", 7))
+            painter.setFont(make_font(FONT_SIZE_CAPTION))
             painter.setPen(QPen(QColor(200, 200, 200)))
             painter.drawText(
                 QRect(wx1, wy2 - 14, wx2 - wx1, 14),
@@ -374,7 +381,7 @@ class ZoneCanvas(QLabel):
         pm.fill(QColor(10, 10, 10))
         p = QPainter(pm)
         p.setPen(QColor(60, 60, 60))
-        p.setFont(QFont("Consolas", 11))
+        p.setFont(make_font(FONT_SIZE_BODY))
         p.drawText(pm.rect(), Qt.AlignCenter,
                    "[ No camera frame ]\n\nClick  ▶ Start Preview  or  📸 Capture Frame")
         p.end()
@@ -442,7 +449,7 @@ class ZoneEditorRow(QFrame):
 
         # Zone ID badge
         badge = QLabel(f"Z{zone.zone_id}")
-        badge.setFont(QFont("Consolas", 9, QFont.Bold))
+        badge.setFont(make_font(FONT_SIZE_LABEL, bold=True))
         badge.setFixedWidth(26)
         badge.setAlignment(Qt.AlignCenter)
         badge.setStyleSheet(
@@ -453,7 +460,7 @@ class ZoneEditorRow(QFrame):
 
         # Name editor
         self._name_edit = QLineEdit(zone.name)
-        self._name_edit.setFont(QFont("Consolas", 9))
+        self._name_edit.setFont(make_font(FONT_SIZE_BODY))
         self._name_edit.setStyleSheet(
             "background:#0d1b2a; color:#eceff1; "
             "border:1px solid #37474f; border-radius:3px; padding:2px 4px;"
@@ -467,7 +474,7 @@ class ZoneEditorRow(QFrame):
         coords = QLabel(
             f"({zone.x1},{zone.y1})\n({zone.x2},{zone.y2})"
         )
-        coords.setFont(QFont("Consolas", 7))
+        coords.setFont(make_font(FONT_SIZE_CAPTION))
         coords.setStyleSheet("color: #546e7a;")
         coords.setFixedWidth(90)
         layout.addWidget(coords)
@@ -485,7 +492,7 @@ class ZoneEditorRow(QFrame):
 
         # Delete button
         del_btn = QPushButton("✕")
-        del_btn.setFont(QFont("Consolas", 9, QFont.Bold))
+        del_btn.setFont(make_font(FONT_SIZE_LABEL, bold=True))
         del_btn.setFixedSize(22, 22)
         del_btn.setStyleSheet(
             "background-color:#37474f; color:#ef9a9a; "
@@ -584,7 +591,7 @@ class CalibrationScreen(QWidget):
         row = QHBoxLayout()
 
         title = QLabel("🗺  ZONE CALIBRATION")
-        title.setFont(QFont("Consolas", 14, QFont.Bold))
+        title.setFont(make_font(FONT_SIZE_TITLE, bold=True))
         title.setStyleSheet("color: #00bcd4;")
         row.addWidget(title)
         row.addStretch()
@@ -593,7 +600,7 @@ class CalibrationScreen(QWidget):
             "Drag on the preview to draw a zone rectangle.  "
             "Hover to inspect.  Right-panel to rename / recolour."
         )
-        self._lbl_hint.setFont(QFont("Consolas", 8))
+        self._lbl_hint.setFont(make_font(FONT_SIZE_CAPTION))
         self._lbl_hint.setStyleSheet("color: #546e7a;")
         row.addWidget(self._lbl_hint)
 
@@ -637,7 +644,7 @@ class CalibrationScreen(QWidget):
 
         # Live indicator dot
         self._lbl_live = QLabel("● LIVE")
-        self._lbl_live.setFont(QFont("Consolas", 8, QFont.Bold))
+        self._lbl_live.setFont(make_font(FONT_SIZE_CAPTION, bold=True))
         self._lbl_live.setStyleSheet("color: #546e7a;")
         toolbar.addWidget(self._lbl_live)
 
@@ -645,7 +652,7 @@ class CalibrationScreen(QWidget):
 
         # Status bar (zone count + hover info)
         self._lbl_status = QLabel("No zones defined — drag to create one")
-        self._lbl_status.setFont(QFont("Consolas", 8))
+        self._lbl_status.setFont(make_font(FONT_SIZE_CAPTION))
         self._lbl_status.setStyleSheet(
             "color: #607d8b; border-top:1px solid #152028; padding-top:3px;"
         )
@@ -704,7 +711,7 @@ class CalibrationScreen(QWidget):
         sid_row = QHBoxLayout()
         sid_row.addWidget(self._mklabel("Station ID:", 8))
         self._edit_station_id = QLineEdit(self._config.active_station)
-        self._edit_station_id.setFont(QFont("Consolas", 9))
+        self._edit_station_id.setFont(make_font(FONT_SIZE_BODY))
         self._edit_station_id.setStyleSheet(
             "background:#0d1b2a; color:#eceff1; "
             "border:1px solid #37474f; border-radius:3px; padding:2px 6px;"
@@ -714,7 +721,7 @@ class CalibrationScreen(QWidget):
 
         # Frame resolution readout (informational)
         self._lbl_resolution = QLabel("Frame: — × —")
-        self._lbl_resolution.setFont(QFont("Consolas", 8))
+        self._lbl_resolution.setFont(make_font(FONT_SIZE_CAPTION))
         self._lbl_resolution.setStyleSheet("color: #546e7a;")
         io_layout.addWidget(self._lbl_resolution)
 
@@ -945,7 +952,7 @@ class CalibrationScreen(QWidget):
                 self._preview_timer.start()
                 self._btn_preview.setText("⏹  Stop Preview")
                 self._lbl_live.setStyleSheet(
-                    "color: #d50000; font-family:Consolas; font-size:8px; font-weight:bold;"
+                    f"color: #d50000; font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_CAPTION}px; font-weight:bold;"
                 )
                 # Read frame size
                 w = self._camera.actual_width
@@ -1130,44 +1137,19 @@ class CalibrationScreen(QWidget):
         accent: str = "#263238",
     ) -> QPushButton:
         btn = QPushButton(label)
-        btn.setFont(QFont("Consolas", 9))
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {accent};
-                color: #eceff1;
-                border: 1px solid #455a64;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }}
-            QPushButton:hover  {{ background-color: #37474f; border-color: #00bcd4; }}
-            QPushButton:pressed {{ background-color: #0d1b2a; }}
-            QPushButton:disabled {{ color: #455a64; border-color: #263238; }}
-        """)
+        btn.setFont(make_font(FONT_SIZE_BODY))
+        btn.setStyleSheet(btn_stylesheet(accent))
         if slot:
             btn.clicked.connect(slot)
         return btn
 
     @staticmethod
-    def _mklabel(text: str, size: int = 9) -> QLabel:
+    def _mklabel(text: str, size: int | None = None) -> QLabel:
         lbl = QLabel(text)
-        lbl.setFont(QFont("Consolas", size))
-        lbl.setStyleSheet("color: #607d8b;")
+        lbl.setFont(make_font(size if size is not None else FONT_SIZE_LABEL))
+        lbl.setStyleSheet(f"color: {CLR_MUTED};")
         return lbl
 
     @staticmethod
     def _group_style() -> str:
-        return """
-            QGroupBox {
-                color: #546e7a;
-                border: 1px solid #263238;
-                border-radius: 5px;
-                margin-top: 10px;
-                font-family: Consolas;
-                font-size: 9px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 4px;
-            }
-        """
+        return groupbox_stylesheet()

@@ -13,7 +13,7 @@ Screen indices
 Navigation wiring
 -----------------
   CameraScreen.camera_confirmed  → show Calibration
-  CalibrationScreen.config_saved → show GoldenCycle
+  CalibrationScreen.config_saved → check DB for existing golden → dialog or GoldenCycle
   GoldenCycleScreen.golden_ready → show Monitor + start_session()
   MonitorScreen.session_stopped  → show Summary + load_session()
   SummaryScreen.back_to_monitor  → show Monitor + start_session()
@@ -29,11 +29,14 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMainWindow,
     QMenuBar,
+    QMessageBox,
+    QPushButton,
     QStackedWidget,
     QStatusBar,
     QWidget,
 )
 
+from core.dtw_comparator import GoldenReference
 from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
 from gui.calibration_screen import CalibrationScreen
@@ -106,7 +109,7 @@ class MainWindow(QMainWindow):
         self._calibration_screen = CalibrationScreen(self._config)
         self._stack.addWidget(self._calibration_screen)
         self._calibration_screen.calibration_saved.connect(
-            lambda _: self._go(IDX_GOLDEN)
+            self._on_calibration_saved
         )
 
         # 2 — Golden Cycle
@@ -139,6 +142,12 @@ class MainWindow(QMainWindow):
             act.triggered.connect(lambda checked, i=idx: self._go(i))
             nav.addAction(act)
 
+        tools = menubar.addMenu("เครื่องมือ")
+        act_rerecord = QAction("🔄  Re-record Golden Standard", self)
+        act_rerecord.setToolTip("บันทึก Golden Standard ใหม่โดยไม่ต้องรีสตาร์ทแอป")
+        act_rerecord.triggered.connect(self._rerecord_golden)
+        tools.addAction(act_rerecord)
+
     def _build_status_bar(self) -> None:
         self._status_lbl = QLabel("พร้อมใช้งาน")
         self._status_lbl.setFont(QFont("Consolas", 8))
@@ -151,12 +160,82 @@ class MainWindow(QMainWindow):
     def _go(self, idx: int) -> None:
         self._stack.setCurrentIndex(idx)
 
+    # ------------------------------------------------------------------
+    # After calibration: check for existing golden standard
+    # ------------------------------------------------------------------
+
+    def _on_calibration_saved(self, cfg: dict) -> None:
+        station_id = cfg.get("station_id", self._config.active_station) or ""
+        gc_row = None
+        if station_id:
+            try:
+                gc_row = self._db.load_golden_cycle(station_id)
+            except Exception:
+                gc_row = None
+
+        if gc_row is not None:
+            # Ask the user whether to reuse or re-record
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Golden Standard พบข้อมูลเดิม")
+            msg.setText(
+                f"<b>Station: {station_id}</b><br><br>"
+                f"พบ Golden Standard ที่บันทึกไว้แล้ว "
+                f"({gc_row.num_source_cycles} cycles, "
+                f"บันทึกเมื่อ {gc_row.recorded_at.strftime('%Y-%m-%d %H:%M') if gc_row.recorded_at else '—'})<br><br>"
+                "ต้องการทำอะไร?"
+            )
+            msg.setIcon(QMessageBox.Question)
+            btn_use    = msg.addButton("ใช้ Golden Standard เดิม", QMessageBox.AcceptRole)
+            btn_rerecord = msg.addButton("บันทึกใหม่", QMessageBox.RejectRole)
+            msg.setDefaultButton(btn_use)
+            msg.exec_()
+
+            if msg.clickedButton() == btn_use:
+                golden_ref = self._build_golden_ref_from_row(gc_row)
+                self._go(IDX_MONITOR)
+                self._monitor_screen.start_session(golden_ref)
+                self._status_lbl.setText("กำลัง Monitor... (ใช้ Golden เดิม)")
+                return
+
+        # No existing golden — or user chose to re-record
+        self._go(IDX_GOLDEN)
+
+    @staticmethod
+    def _build_golden_ref_from_row(gc_row) -> GoldenReference:
+        """Reconstruct a GoldenReference from a GoldenCycle ORM row."""
+        # zone_standard_times keys are stored as strings in JSON
+        standard_times = {
+            int(k): float(v)
+            for k, v in (gc_row.zone_standard_times or {}).items()
+        }
+        zone_order = sorted(standard_times.keys())
+        return GoldenReference(
+            raw_trajectory      = gc_row.trajectory_points or [],
+            standard_times      = standard_times,
+            total_standard_time = float(gc_row.standard_total_sec or 0),
+            zone_order          = zone_order,
+            n_cycles_recorded   = int(gc_row.num_source_cycles or 0),
+        )
+
+    # ------------------------------------------------------------------
+    # Re-record Golden Standard (from Tools menu or Monitor screen)
+    # ------------------------------------------------------------------
+
+    def _rerecord_golden(self) -> None:
+        """Navigate to GoldenCycleScreen to record a fresh golden standard."""
+        reply = QMessageBox.question(
+            self,
+            "Re-record Golden Standard",
+            "ต้องการบันทึก Golden Standard ใหม่ใช่ไหม?\n"
+            "ข้อมูล Golden เดิมจะถูกแทนที่เมื่อบันทึกเสร็จ",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self._go(IDX_GOLDEN)
+
     def _on_golden_ready(self, golden_ref=None) -> None:
         self._go(IDX_MONITOR)
-        try:
-            self._monitor_screen.start_session(golden_ref)
-        except Exception:
-            self._monitor_screen.start_session()
         self._monitor_screen.start_session(golden_ref)
         self._status_lbl.setText("กำลัง Monitor...")
 

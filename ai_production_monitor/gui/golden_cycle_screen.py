@@ -28,6 +28,13 @@ from core.cycle_tracker import CycleRecord, CycleTracker
 from core.point_trigger_detector import TriggerPoint
 from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
+from gui.theme import (
+    FONT_FAMILY, FONT_SIZE_BODY, FONT_SIZE_CAPTION, FONT_SIZE_LABEL,
+    FONT_SIZE_METRIC, FONT_SIZE_SECTION, FONT_SIZE_STATUS, FONT_SIZE_TITLE,
+    make_font,
+    btn_stylesheet, groupbox_stylesheet,
+    CLR_MUTED,
+)
 from gui.widgets.video_widget import VideoWidget
 from gui.monitor_screen import _trigger_points_from_config
 from vision.point_tracker_thread import PointTrackerThread
@@ -69,8 +76,7 @@ class CycleResultRow(QFrame):
     @staticmethod
     def _mk_label(text: str, bold=False, color="#b0bec5") -> QLabel:
         lbl = QLabel(text)
-        font = QFont("Consolas", 8, QFont.Bold if bold else QFont.Normal)
-        lbl.setFont(font)
+        lbl.setFont(make_font(FONT_SIZE_CAPTION, bold=bold))
         lbl.setStyleSheet(f"color: {color};")
         lbl.setContentsMargins(0, 0, 8, 0)
         return lbl
@@ -116,13 +122,13 @@ class GoldenCycleScreen(QWidget):
         # Header
         hdr = QHBoxLayout()
         title = QLabel("🎯  GOLDEN CYCLE RECORDING")
-        title.setFont(QFont("Consolas", 14, QFont.Bold))
+        title.setFont(make_font(FONT_SIZE_TITLE, bold=True))
         title.setStyleSheet("color: #00bcd4;")
         hdr.addWidget(title)
         hdr.addStretch()
 
         self._lbl_cycle_count = QLabel(f"0 / {self._min_cycles}–{self._max_cycles} cycles")
-        self._lbl_cycle_count.setFont(QFont("Consolas", 10))
+        self._lbl_cycle_count.setFont(make_font(FONT_SIZE_LABEL))
         self._lbl_cycle_count.setStyleSheet("color: #ffab00;")
         hdr.addWidget(self._lbl_cycle_count)
         root.addLayout(hdr)
@@ -132,7 +138,7 @@ class GoldenCycleScreen(QWidget):
             f"Perform {self._min_cycles}–{self._max_cycles} correct production cycles. "
             "The system will calculate the standard (median) time for each zone."
         )
-        instr.setFont(QFont("Consolas", 9))
+        instr.setFont(make_font(FONT_SIZE_BODY))
         instr.setStyleSheet(
             "color: #b0bec5; background-color: #1a2f3a; "
             "border-left: 3px solid #00bcd4; padding: 6px;"
@@ -152,10 +158,10 @@ class GoldenCycleScreen(QWidget):
         # State HUD
         state_row = QHBoxLayout()
         self._lbl_state = QLabel("STATE: IDLE")
-        self._lbl_state.setFont(QFont("Consolas", 11, QFont.Bold))
+        self._lbl_state.setFont(make_font(FONT_SIZE_STATUS, bold=True))
         self._lbl_state.setStyleSheet("color: #607d8b;")
         self._lbl_elapsed = QLabel("0.0s")
-        self._lbl_elapsed.setFont(QFont("Consolas", 16, QFont.Bold))
+        self._lbl_elapsed.setFont(make_font(FONT_SIZE_METRIC, bold=True))
         self._lbl_elapsed.setStyleSheet("color: #eceff1;")
         state_row.addWidget(self._lbl_state)
         state_row.addStretch()
@@ -164,7 +170,7 @@ class GoldenCycleScreen(QWidget):
 
         # Alert banner
         self._lbl_alert = QLabel("")
-        self._lbl_alert.setFont(QFont("Consolas", 10, QFont.Bold))
+        self._lbl_alert.setFont(make_font(FONT_SIZE_BODY, bold=True))
         self._lbl_alert.setStyleSheet(
             "color: #d50000; background-color: #3e0000; "
             "border: 1px solid #d50000; border-radius: 3px; padding: 4px;"
@@ -201,7 +207,10 @@ class GoldenCycleScreen(QWidget):
         right.addWidget(self._btn_compute)
 
         # Progress
-        right.addWidget(QLabel("Recording progress:").setFont(QFont("Consolas", 8)) or QLabel("Recording progress:"))
+        _prog_lbl = QLabel("Recording progress:")
+        _prog_lbl.setFont(make_font(FONT_SIZE_LABEL))
+        _prog_lbl.setStyleSheet(f"color: {CLR_MUTED};")
+        right.addWidget(_prog_lbl)
         self._progress = QProgressBar()
         self._progress.setRange(0, self._min_cycles)
         self._progress.setValue(0)
@@ -215,8 +224,8 @@ class GoldenCycleScreen(QWidget):
 
         # Cycle log
         log_label = QLabel("Recorded Cycles:")
-        log_label.setFont(QFont("Consolas", 8))
-        log_label.setStyleSheet("color: #607d8b;")
+        log_label.setFont(make_font(FONT_SIZE_LABEL))
+        log_label.setStyleSheet(f"color: {CLR_MUTED};")
         right.addWidget(log_label)
 
         scroll = QScrollArea()
@@ -333,13 +342,13 @@ class GoldenCycleScreen(QWidget):
         for zid, t in sorted(self._golden_ref.standard_times.items()):
             name = zones.get(zid, f"Zone {zid}")
             lbl = QLabel(f"  {name}: {t:.2f}s")
-            lbl.setFont(QFont("Consolas", 9))
+            lbl.setFont(make_font(FONT_SIZE_BODY))
             lbl.setStyleSheet("color: #00c853;")
             self._std_layout.addWidget(lbl)
             total += t
 
         total_lbl = QLabel(f"  Total: {total:.2f}s")
-        total_lbl.setFont(QFont("Consolas", 10, QFont.Bold))
+        total_lbl.setFont(make_font(FONT_SIZE_LABEL, bold=True))
         total_lbl.setStyleSheet("color: #00bcd4;")
         self._std_layout.addWidget(total_lbl)
 
@@ -469,30 +478,8 @@ class GoldenCycleScreen(QWidget):
 
     @staticmethod
     def _btn_style(accent="#263238") -> str:
-        return f"""
-            QPushButton {{
-                background-color: {accent};
-                color: #eceff1;
-                border: 1px solid #455a64;
-                border-radius: 4px;
-                padding: 6px;
-                font-family: Consolas;
-                font-size: 10px;
-            }}
-            QPushButton:hover {{ border-color: #00bcd4; }}
-            QPushButton:disabled {{ color: #455a64; border-color: #263238; }}
-        """
+        return btn_stylesheet(accent)
 
     @staticmethod
     def _group_style() -> str:
-        return """
-            QGroupBox {
-                color: #607d8b;
-                border: 1px solid #263238;
-                border-radius: 4px;
-                margin-top: 8px;
-                font-family: Consolas;
-                font-size: 9px;
-            }
-            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
-        """
+        return groupbox_stylesheet()

@@ -43,6 +43,7 @@
     <Compile Include="ai_production_monitor\gui\main_window.py" />
     <Compile Include="ai_production_monitor\gui\monitor_screen.py" />
     <Compile Include="ai_production_monitor\gui\summary_screen.py" />
+    <Compile Include="ai_production_monitor\gui\theme.py" />
     <Compile Include="ai_production_monitor\gui\widgets\chart_widget.py" />
     <Compile Include="ai_production_monitor\gui\widgets\video_widget.py" />
     <Compile Include="ai_production_monitor\gui\widgets\zone_widget.py" />
