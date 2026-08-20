@@ -201,3 +201,16 @@ class ConfigHandler:
 
     def get_max_golden_cycles(self, station_id: str | None = None) -> int:
         return self.get_station(station_id).get("max_golden_cycles", 5)
+
+    # ------------------------------------------------------------------
+    # UI preferences
+    # ------------------------------------------------------------------
+
+    def get_show_ghost(self) -> bool:
+        """Return whether the ghost overlay is enabled (default: True)."""
+        return bool(self._data.get("ui", {}).get("show_ghost_overlay", True))
+
+    def set_show_ghost(self, value: bool) -> None:
+        """Persist ghost overlay toggle across sessions."""
+        self._data.setdefault("ui", {})["show_ghost_overlay"] = bool(value)
+        self.save()

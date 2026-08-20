@@ -30,6 +30,7 @@
     <Compile Include="ai_production_monitor\core\alert_manager.py" />
     <Compile Include="ai_production_monitor\core\cycle_tracker.py" />
     <Compile Include="ai_production_monitor\core\dtw_comparator.py" />
+    <Compile Include="ai_production_monitor\core\ghost_interpolator.py" />
     <Compile Include="ai_production_monitor\core\point_trigger_detector.py" />
     <Compile Include="ai_production_monitor\core\sequence_checker.py" />
     <Compile Include="ai_production_monitor\core\__init__.py" />
@@ -52,6 +53,7 @@
     <Compile Include="ai_production_monitor\run.py" />
     <Compile Include="ai_production_monitor\tests\test_alert_system.py" />
     <Compile Include="ai_production_monitor\tests\test_cycle_comparator.py" />
+    <Compile Include="ai_production_monitor\tests\test_ghost_interpolator.py" />
     <Compile Include="ai_production_monitor\tests\test_point_tracker_cycle_integration.py" />
     <Compile Include="ai_production_monitor\tests\test_point_trigger_detector.py" />
     <Compile Include="ai_production_monitor\test_calibration.py" />

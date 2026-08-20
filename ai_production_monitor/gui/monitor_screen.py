@@ -21,12 +21,19 @@ Layout
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont
+from collections import deque
+
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPointF
+from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QBrush
 from PyQt5.QtWidgets import (
-    QFrame, QGroupBox, QHBoxLayout, QLabel,
+    QCheckBox, QFrame, QGroupBox, QHBoxLayout, QLabel,
     QProgressBar, QPushButton, QScrollArea,
     QVBoxLayout, QWidget,
+)
+
+from core.ghost_interpolator import (
+    interpolate_ghost_position,
+    scale_to_widget,
 )
 
 from core.cycle_tracker import CycleTracker, CycleRecord
@@ -139,6 +146,119 @@ class CycleSummaryCard(QGroupBox):
 
 
 # ---------------------------------------------------------------------------
+# Ghost overlay widget
+# ---------------------------------------------------------------------------
+
+# How many seconds of trail to keep (shown as fading dots behind the ghost)
+_TRAIL_SECS: float = 0.8
+# Max number of trail samples retained (sampled at ~30 fps → ~24 pts)
+_TRAIL_MAX: int = 60
+# Radius of the main ghost circle (widget pixels)
+_GHOST_RADIUS: int = 10
+
+
+class GhostOverlayWidget(QWidget):
+    """Transparent overlay that sits on top of VideoWidget.
+
+    Call `set_ghost(state, wx, wy, delta_sec)` to push a new position, then
+    `update()` is called automatically.  When hidden (show_ghost=False) the
+    caller must not call set_ghost() at all — this widget just won't paint.
+    """
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        # Make the widget fully transparent to mouse events and background
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet("background: transparent;")
+
+        # Current ghost state (widget-space pixels)
+        self._wx: float = 0.0
+        self._wy: float = 0.0
+        self._delta_sec: float | None = None   # None = unknown
+        self._clamped: bool = False
+
+        # Trail: deque of (wx, wy) — newest at right
+        self._trail: deque[tuple[float, float]] = deque(maxlen=_TRAIL_MAX)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def set_ghost(
+        self,
+        wx: float,
+        wy: float,
+        delta_sec: float | None,
+        clamped: bool,
+    ) -> None:
+        """Push a new ghost position and trigger repaint."""
+        self._trail.append((self._wx, self._wy))
+        self._wx = wx
+        self._wy = wy
+        self._delta_sec = delta_sec
+        self._clamped = clamped
+        self.update()
+
+    def reset(self) -> None:
+        """Clear trail and ghost position (call when session stops)."""
+        self._trail.clear()
+        self._delta_sec = None
+        self._clamped = False
+        self.update()
+
+    # ------------------------------------------------------------------
+    # Qt paint
+    # ------------------------------------------------------------------
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if not self._trail and self._delta_sec is None:
+            return  # nothing to draw yet
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        # --- Trail ---
+        n = len(self._trail)
+        for i, (tx, ty) in enumerate(self._trail):
+            # alpha fades from very faint (oldest) to moderate (newest)
+            alpha = int(20 + 120 * (i / max(n - 1, 1)))
+            color = QColor(0, 200, 83, alpha)   # green
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(color))
+            radius = max(2, int(_GHOST_RADIUS * 0.5 * (i / max(n - 1, 1))))
+            painter.drawEllipse(QPointF(tx, ty), radius, radius)
+
+        # --- Main ghost circle (dashed border, semi-transparent fill) ---
+        fill_color = QColor(0, 200, 83, 80)     # semi-transparent green
+        border_color = QColor(0, 230, 118, 220) # bright green border
+
+        pen = QPen(border_color, 2, Qt.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(fill_color))
+        painter.drawEllipse(QPointF(self._wx, self._wy), _GHOST_RADIUS, _GHOST_RADIUS)
+
+        # --- Delta label ---
+        if self._delta_sec is not None:
+            sign = "+" if self._delta_sec >= 0 else "-"
+            label = f"{sign}{abs(self._delta_sec):.1f}s"
+            # Red when behind (positive delta = slow), green when ahead
+            text_color = QColor("#ff1744") if self._delta_sec > 0 else QColor("#00e676")
+            painter.setPen(text_color)
+            font = QFont("Consolas", 9, QFont.Bold)
+            painter.setFont(font)
+            # Position label just to the right and slightly above the circle
+            painter.drawText(
+                int(self._wx + _GHOST_RADIUS + 4),
+                int(self._wy - 4),
+                label,
+            )
+
+        painter.end()
+
+
+# ---------------------------------------------------------------------------
 # Monitor Screen
 # ---------------------------------------------------------------------------
 
@@ -172,6 +292,12 @@ class MonitorScreen(QWidget):
         self._cycle_times: list[float] = []
         self._all_cycle_records: list[dict] = []
 
+        # Ghost overlay state
+        self._last_hand_x: float = 0.0
+        self._last_hand_y: float = 0.0
+        self._last_frame_w: int = 0
+        self._last_frame_h: int = 0
+
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -203,9 +329,37 @@ class MonitorScreen(QWidget):
 
         # ---- Left: video area ----
         video_col = QVBoxLayout()
-        self._video = VideoWidget()
-        self._video.setMinimumSize(640, 360)
-        video_col.addWidget(self._video)
+
+        # Video container (positions ghost overlay relative to VideoWidget)
+        video_container = QWidget()
+        video_container.setMinimumSize(640, 360)
+        video_container_layout = QVBoxLayout(video_container)
+        video_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._video = VideoWidget(video_container)
+        video_container_layout.addWidget(self._video)
+
+        # Ghost overlay — transparent child widget, resized in resizeEvent
+        self._ghost_overlay = GhostOverlayWidget(self._video)
+        self._ghost_overlay.resize(self._video.size())
+        # Visibility follows the persisted config setting
+        if self._config.get_show_ghost():
+            self._ghost_overlay.show()
+        else:
+            self._ghost_overlay.hide()
+
+        # Toggle: Show Golden Master
+        ghost_row = QHBoxLayout()
+        self._chk_ghost = QCheckBox("แสดงมาสเตอร์เขียว  (Show Golden Master)")
+        self._chk_ghost.setFont(make_font(FONT_SIZE_LABEL))
+        self._chk_ghost.setStyleSheet("color: #80cbc4;")
+        self._chk_ghost.setChecked(self._config.get_show_ghost())
+        self._chk_ghost.toggled.connect(self._on_ghost_toggled)
+        ghost_row.addWidget(self._chk_ghost)
+        ghost_row.addStretch()
+        video_col.addLayout(ghost_row)
+
+        video_col.addWidget(video_container)
 
         # Progress bar (cycle %)
         prog_row = QHBoxLayout()
@@ -307,6 +461,7 @@ class MonitorScreen(QWidget):
         # Start PointTrackerThread
         self._tracker_thread = PointTrackerThread(self._config, trigger_points)
         self._tracker_thread.frame_ready.connect(self._video.set_frame)
+        self._tracker_thread.frame_ready.connect(self._on_frame_for_ghost)
         self._tracker_thread.error_occurred.connect(self._on_error)
         self._tracker_thread.point_triggered.connect(self._on_point_triggered)
         self._tracker_thread.point_state_changed.connect(self._on_point_state_changed)
@@ -319,6 +474,7 @@ class MonitorScreen(QWidget):
             self._tracker_thread = None
         self._cycle_tracker = None
         self._prev_point_states = {}   # clear stale states
+        self._ghost_overlay.reset()
 
         if self._session_id:
             self._db.end_session(self._session_id)
@@ -326,6 +482,79 @@ class MonitorScreen(QWidget):
 
     # ------------------------------------------------------------------
     # Signal handlers
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Ghost overlay helpers
+    # ------------------------------------------------------------------
+
+    def _on_ghost_toggled(self, checked: bool) -> None:
+        """Persist toggle and show/hide overlay immediately."""
+        self._config.set_show_ghost(checked)
+        if not checked:
+            self._ghost_overlay.reset()
+            self._ghost_overlay.hide()
+        else:
+            self._ghost_overlay.show()
+
+    def _on_frame_for_ghost(self, frame) -> None:
+        """Called on every new frame — resize overlay to match VideoWidget
+        and compute ghost position if toggle is on."""
+        # Keep overlay filling the video widget
+        if self._ghost_overlay.size() != self._video.size():
+            self._ghost_overlay.resize(self._video.size())
+
+        if not self._chk_ghost.isChecked():
+            return
+
+        # Cache frame dimensions for coordinate scaling
+        if frame is not None and frame.size > 0:
+            h, w = frame.shape[:2]
+            self._last_frame_w = w
+            self._last_frame_h = h
+
+        self._update_ghost()
+
+    def _update_ghost(self) -> None:
+        """Compute ghost position from golden trajectory and elapsed time,
+        then push it to GhostOverlayWidget."""
+        if not self._golden_ref:
+            return
+        if not self._cycle_tracker:
+            return
+
+        elapsed = self._cycle_tracker.cycle_elapsed
+        if elapsed is None or elapsed < 0:
+            return
+
+        golden_total = self._golden_ref.total_standard_time
+        traj = self._golden_ref.raw_trajectory
+
+        ghost = interpolate_ghost_position(traj, elapsed, golden_total)
+        if ghost is None:
+            return
+
+        # Scale frame-pixel → widget-pixel using same letterbox transform
+        fw = self._last_frame_w or self._video.width()
+        fh = self._last_frame_h or self._video.height()
+        wx, wy = scale_to_widget(
+            ghost,
+            frame_w=fw, frame_h=fh,
+            widget_w=self._video.width(), widget_h=self._video.height(),
+        )
+
+        # Delta: positive = operator is slower than golden (label goes red)
+        # We compute it as "elapsed - (ghost.t_norm * golden_total)"
+        # i.e. how many seconds behind/ahead the operator is in wall-clock time
+        delta_sec: float | None = None
+        if golden_total > 0:
+            ghost_elapsed = ghost.t_norm * golden_total
+            delta_sec = round(elapsed - ghost_elapsed, 1)
+
+        self._ghost_overlay.set_ghost(wx, wy, delta_sec, ghost.clamped)
+
+    # ------------------------------------------------------------------
+    # Cycle complete callback
     # ------------------------------------------------------------------
 
     def _on_cycle_complete(self, record: dict) -> None:
@@ -405,6 +634,8 @@ class MonitorScreen(QWidget):
 
     def _on_hand_position(self, hand_x: float, hand_y: float) -> None:
         """Forward hand position to CycleTracker for real-time stats."""
+        self._last_hand_x = hand_x
+        self._last_hand_y = hand_y
         if self._cycle_tracker:
             self._cycle_tracker.tick(hand_x, hand_y)
 
