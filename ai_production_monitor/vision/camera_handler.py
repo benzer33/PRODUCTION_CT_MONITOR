@@ -501,8 +501,10 @@ _NETWORK_OPEN_TIMEOUT = 8.0
 # How long to wait for network camera to deliver first frame
 _FRAME_TIMEOUT = 5.0
 # Delay between reconnect attempts
-_RECONNECT_DELAY = 2.0
-_MAX_RECONNECT   = 5
+_RECONNECT_DELAY = 0.5
+_MAX_RECONNECT   = 10
+# How many consecutive read() failures before attempting a full reconnect
+_FAIL_BEFORE_RECONNECT = 5
 
 
 class CameraManager:
@@ -613,15 +615,21 @@ class CameraManager:
                 cap.release()
             return CameraConnectionResult.fail(code, f"Source: {cap_source}")
 
-        # Request resolution / fps
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        cap.set(cv2.CAP_PROP_FPS,          self.fps)
+        # Request resolution / fps — some backends throw C++ exceptions on set()
+        try:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            cap.set(cv2.CAP_PROP_FPS,          self.fps)
+        except Exception:
+            pass  # ignore — actual values will be read back below
 
         # Read actual values back
-        aw  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        ah  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        afp = cap.get(cv2.CAP_PROP_FPS) or float(self.fps)
+        try:
+            aw  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            ah  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            afp = cap.get(cv2.CAP_PROP_FPS) or float(self.fps)
+        except Exception:
+            aw, ah, afp = self.width, self.height, float(self.fps)
 
         # Verify we can actually get a frame
         ok, frame = cap.read()
@@ -658,18 +666,25 @@ class CameraManager:
     # ------------------------------------------------------------------
 
     def read(self) -> tuple[bool, Optional[np.ndarray]]:
-        """Read one frame.  Auto-reconnects on transient failure."""
+        """Read one frame.  Auto-reconnects after sustained failure."""
         if not self.is_open():
             if self._reconnect:
                 return self._try_reconnect()
             return False, None
 
-        ok, frame = self._cap.read()
+        try:
+            ok, frame = self._cap.read()
+        except Exception:
+            ok, frame = False, None
+
         if not ok or frame is None:
             self._fail_count += 1
-            if self._reconnect and self._fail_count <= _MAX_RECONNECT:
-                time.sleep(_RECONNECT_DELAY)
-                return self._try_reconnect()
+            # Only attempt full reconnect after several consecutive failures
+            # so a single dropped frame does not stall the loop for 0.5s
+            if self._reconnect and self._fail_count >= _FAIL_BEFORE_RECONNECT:
+                if self._fail_count <= _FAIL_BEFORE_RECONNECT + _MAX_RECONNECT:
+                    time.sleep(_RECONNECT_DELAY)
+                    return self._try_reconnect()
             return False, None
 
         self._fail_count = 0
@@ -747,9 +762,15 @@ class CameraManager:
     def _try_reconnect(self) -> tuple[bool, Optional[np.ndarray]]:
         self.release()
         time.sleep(_RECONNECT_DELAY)
-        result = self.open()
+        try:
+            result = self.open()
+        except Exception:
+            return False, None
         if result.success and self._cap:
-            ok, frame = self._cap.read()
+            try:
+                ok, frame = self._cap.read()
+            except Exception:
+                return False, None
             return (True, frame) if ok else (False, None)
         return False, None
 

@@ -61,6 +61,7 @@
     <Compile Include="ai_production_monitor\vision\__init__.py" />
     <Compile Include="ai_production_monitor\__init__.py" />
     <Compile Include="PRODUCTION_CT_MONITOR.py" />
+    <Compile Include="_fix_camera_loop.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="ai_production_monitor\" />

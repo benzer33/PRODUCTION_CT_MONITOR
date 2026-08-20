@@ -223,10 +223,7 @@ class _SummaryAnalysisWorker(QThread):
 
     def run(self) -> None:
         # ── Resolve API key ────────────────────────────────────────────
-        api_key = (
-            os.environ.get("GOOGLE_API_KEY", "")
-            or self._config.get("google_api_key", "")
-        )
+        api_key = os.environ.get("GOOGLE_API_KEY", "")
         if not api_key or api_key == "YOUR_API_KEY_HERE":
             self.analysis_error.emit(
                 "ไม่พบ Google API key\n"
@@ -236,7 +233,7 @@ class _SummaryAnalysisWorker(QThread):
 
         worker = AnalysisWorker(
             api_key      = api_key,
-            model        = "gemini-2.0-flash",
+            model        = "gemini-3.5-flash",
             session_data = self._session_data,
         )
         worker.analysis_ready.connect(self.analysis_ready)

@@ -1,4 +1,4 @@
-"""
+﻿"""
 vision/point_tracker_thread.py
 QThread wrapper สำหรับ PointTriggerDetector
 
@@ -163,12 +163,21 @@ class PointTrackerThread(QThread):
         self._detector.reset_cycle()  # เริ่มด้วย WAITING_FOR_CLEAR เสมอ
 
         # ── Main frame loop ─────────────────────────────────────────
+        _consecutive_fails = 0
+        _MAX_CONSECUTIVE_FAILS = 60          # ~6 s at 100 ms sleep before giving up
         while self._running:
             ok, frame = self._camera.read()
             if not ok or frame is None:
-                self.error_occurred.emit("Camera read failed — retrying…")
-                time.sleep(0.05)
+                _consecutive_fails += 1
+                if _consecutive_fails == 1:
+                    self.error_occurred.emit("Camera read failed — retrying…")
+                if _consecutive_fails >= _MAX_CONSECUTIVE_FAILS:
+                    self.error_occurred.emit("Camera lost — stopping.")
+                    self._running = False
+                    break
+                time.sleep(0.1)
                 continue
+            _consecutive_fails = 0
 
             result = self._detector.process_frame(frame)
 

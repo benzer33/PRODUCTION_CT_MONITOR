@@ -30,6 +30,7 @@ from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
 from gui.widgets.video_widget import VideoWidget
 from gui.monitor_screen import _trigger_points_from_config
+from vision.point_tracker_thread import PointTrackerThread
 
 
 class CycleResultRow(QFrame):
@@ -266,7 +267,6 @@ class GoldenCycleScreen(QWidget):
             on_state_change   = self._cb_state_change,
         )
 
-        from vision.point_tracker_thread import PointTrackerThread
         self._tracker_thread = PointTrackerThread(self._config, trigger_points)
         self._tracker_thread.frame_ready.connect(self._video.set_frame)
         self._tracker_thread.error_occurred.connect(self._on_error)
