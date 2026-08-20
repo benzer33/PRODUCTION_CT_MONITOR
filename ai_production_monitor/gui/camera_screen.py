@@ -144,7 +144,7 @@ class _WebcamPanel(QFrame):
 
         # Scan status
         self.lbl_scan_status = QLabel("Click ⟳ to detect cameras")
-        self.lbl_scan_status.setFont(QFont("Consolas", 8))
+        self.lbl_scan_status.setFont(QFont("Consolas", 11))
         self.lbl_scan_status.setStyleSheet("color: #546e7a;")
         layout.addRow("", self.lbl_scan_status)
 
