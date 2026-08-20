@@ -23,7 +23,10 @@ SQLAlchemy>=2.0.0
 pyqtgraph>=0.13.3
 matplotlib>=3.7.0
 
-# AI — Anthropic Claude
+# AI — Google Gemini  (new google-genai SDK, replaces deprecated google-generativeai)
+google-genai>=1.0.0
+
+# AI — Anthropic Claude  (kept for reference / fallback — not active by default)
 anthropic>=0.25.0
 
 # Utilities

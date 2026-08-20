@@ -34,7 +34,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from ai.anthropic_client import AnalysisWorker
+from ai.gemini_client import AnalysisWorker
 from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
 
@@ -224,19 +224,19 @@ class _SummaryAnalysisWorker(QThread):
     def run(self) -> None:
         # ── Resolve API key ────────────────────────────────────────────
         api_key = (
-            os.environ.get("ANTHROPIC_API_KEY", "")
-            or self._config.get("anthropic_api_key", "")
+            os.environ.get("GOOGLE_API_KEY", "")
+            or self._config.get("google_api_key", "")
         )
         if not api_key or api_key == "YOUR_API_KEY_HERE":
             self.analysis_error.emit(
-                "ไม่พบ Anthropic API key\n"
-                "กรุณาตั้งค่า ANTHROPIC_API_KEY ใน .env หรือ config/default_config.json"
+                "ไม่พบ Google API key\n"
+                "กรุณาตั้งค่า GOOGLE_API_KEY ใน .env หรือ config/default_config.json"
             )
             return
 
         worker = AnalysisWorker(
             api_key      = api_key,
-            model        = "claude-sonnet-4-6",
+            model        = "gemini-2.0-flash",
             session_data = self._session_data,
         )
         worker.analysis_ready.connect(self.analysis_ready)

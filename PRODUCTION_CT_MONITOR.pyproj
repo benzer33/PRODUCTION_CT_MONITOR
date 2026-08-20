@@ -24,6 +24,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="ai_production_monitor\ai\anthropic_client.py" />
+    <Compile Include="ai_production_monitor\ai\gemini_client.py" />
     <Compile Include="ai_production_monitor\ai\prompt_templates.py" />
     <Compile Include="ai_production_monitor\ai\__init__.py" />
     <Compile Include="ai_production_monitor\core\alert_manager.py" />
