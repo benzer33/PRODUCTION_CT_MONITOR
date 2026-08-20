@@ -20,8 +20,20 @@ from dataclasses import dataclass
 from typing import Optional
 
 import cv2
-import mediapipe as mp
 import numpy as np
+
+# MediaPipe ≥ 0.10 moved solutions out of the top-level namespace.
+# Import directly from the subpackage to work across all versions.
+try:
+    from mediapipe.python.solutions import hands as _mp_hands_mod
+    from mediapipe.python.solutions import drawing_utils as _mp_drawing_mod
+    from mediapipe.python.solutions import drawing_styles as _mp_styles_mod
+except ImportError:
+    # Fallback for older mediapipe < 0.10 that still has mp.solutions
+    import mediapipe as _mp_legacy
+    _mp_hands_mod   = _mp_legacy.solutions.hands
+    _mp_drawing_mod = _mp_legacy.solutions.drawing_utils
+    _mp_styles_mod  = _mp_legacy.solutions.drawing_styles
 
 
 @dataclass
@@ -61,9 +73,9 @@ class HandTracker:
         tracking_confidence: float  = 0.5,
         static_image_mode: bool = False,
     ) -> None:
-        self._mp_hands   = mp.solutions.hands
-        self._mp_drawing = mp.solutions.drawing_utils
-        self._mp_styles  = mp.solutions.drawing_styles
+        self._mp_hands   = _mp_hands_mod
+        self._mp_drawing = _mp_drawing_mod
+        self._mp_styles  = _mp_styles_mod
 
         self._hands = self._mp_hands.Hands(
             static_image_mode        = static_image_mode,

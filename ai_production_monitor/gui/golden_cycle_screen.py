@@ -95,6 +95,9 @@ class GoldenCycleScreen(QWidget):
         self._recorded_cycles: list[dict] = []
         self._golden_ref: GoldenReference | None = None
 
+        # Track previous state per point to detect ACTIVE → COOLDOWN transition
+        self._prev_point_states: dict[int, str] = {}
+
         self._min_cycles = config.get_min_golden_cycles()
         self._max_cycles = config.get_max_golden_cycles()
 
@@ -250,6 +253,7 @@ class GoldenCycleScreen(QWidget):
 
     def _start_recording(self) -> None:
         self._recorded_cycles = []
+        self._prev_point_states = {}   # reset prev-state tracker
 
         # Build trigger points from config (polygon centroid adapter)
         trigger_points = _trigger_points_from_config(self._config)
@@ -280,6 +284,7 @@ class GoldenCycleScreen(QWidget):
             self._tracker_thread.stop()
             self._tracker_thread = None
         self._cycle_tracker = None
+        self._prev_point_states = {}   # clear stale states
 
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
@@ -377,6 +382,14 @@ class GoldenCycleScreen(QWidget):
             self._cycle_tracker.tick(hand_x, hand_y)
 
     def _on_point_state_changed(self, point_id: int, state_name: str) -> None:
+        """Relay zone exit to CycleTracker on ACTIVE → COOLDOWN transition."""
+        prev = self._prev_point_states.get(point_id, "")
+        self._prev_point_states[point_id] = state_name
+
+        if prev == "ACTIVE" and state_name == "COOLDOWN":
+            if self._cycle_tracker:
+                self._cycle_tracker.on_zone_event(point_id, "exit")
+
         self._lbl_state.setText(f"STATE: P{point_id}:{state_name}")
 
     def _on_hand_position(self, hand_x: float, hand_y: float) -> None:

@@ -157,6 +157,9 @@ class MonitorScreen(QWidget):
         self._cycle_id:   int | None = None
         self._cycle_number = 0
 
+        # Track previous state per point to detect ACTIVE → COOLDOWN transition
+        self._prev_point_states: dict[int, str] = {}
+
         # Aggregate stats
         self._total = self._pass = self._fail = self._seq_err = 0
         self._cycle_times: list[float] = []
@@ -273,6 +276,7 @@ class MonitorScreen(QWidget):
         self._cycle_times = []
         self._all_cycle_records = []
         self._cycle_number = 0
+        self._prev_point_states = {}   # reset prev-state tracker
 
         # Build trigger points from config (polygon centroid adapter)
         trigger_points = _trigger_points_from_config(self._config)
@@ -307,6 +311,7 @@ class MonitorScreen(QWidget):
             self._tracker_thread.stop()
             self._tracker_thread = None
         self._cycle_tracker = None
+        self._prev_point_states = {}   # clear stale states
 
         if self._session_id:
             self._db.end_session(self._session_id)
@@ -368,7 +373,22 @@ class MonitorScreen(QWidget):
             self._cycle_tracker.tick(hand_x, hand_y)
 
     def _on_point_state_changed(self, point_id: int, state_name: str) -> None:
-        """Update state HUD with point + state name."""
+        """Update state HUD and relay zone exit to CycleTracker.
+
+        The ACTIVE → COOLDOWN transition means the hand has left the point
+        after a confirmed trigger — this is the semantic equivalent of a zone
+        'exit' event that CycleTracker needs to advance the cycle state
+        machine and eventually call _complete_cycle().
+        """
+        prev = self._prev_point_states.get(point_id, "")
+        self._prev_point_states[point_id] = state_name
+
+        # Detect hand-left-point: ACTIVE → COOLDOWN
+        if prev == "ACTIVE" and state_name == "COOLDOWN":
+            if self._cycle_tracker:
+                self._cycle_tracker.on_zone_event(point_id, "exit")
+
+        # HUD update
         self._lbl_state.setText(f"P{point_id}:{state_name}")
         armed_states = {"ARMED", "TRIGGERED_PENDING", "ACTIVE"}
         color = "#00c853" if state_name in armed_states else "#607d8b"

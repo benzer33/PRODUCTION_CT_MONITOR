@@ -4,7 +4,7 @@
   "height": 720,
   "fps": 30,
   "reconnect_on_failure": true,
-  "device_index": 0,
+  "device_index": 1,
   "url": "",
   "username": "",
   "password": ""

@@ -254,8 +254,16 @@ class WebcamSource(BaseCameraSource):
         return f"Webcam  (index {self.device_index})"
 
     def open_capture(self) -> cv2.VideoCapture:
-        """Open with platform-optimal backend."""
-        return cv2.VideoCapture(self.device_index, self._BACKEND)
+        """Open with platform-optimal backend, falling back to CAP_ANY."""
+        cap = cv2.VideoCapture(self.device_index, self._BACKEND)
+        if not cap.isOpened() and self._BACKEND != cv2.CAP_ANY:
+            # DSHOW / platform backend failed — retry with generic backend
+            try:
+                cap.release()
+            except Exception:
+                pass
+            cap = cv2.VideoCapture(self.device_index, cv2.CAP_ANY)
+        return cap
 
 
 # ============================================================================
@@ -635,7 +643,10 @@ class CameraManager:
 
     def release(self) -> None:
         if self._cap:
-            self._cap.release()
+            try:
+                self._cap.release()
+            except Exception:
+                pass
         self._cap     = None
         self._is_open = False
 

@@ -50,6 +50,7 @@
     <Compile Include="ai_production_monitor\run.py" />
     <Compile Include="ai_production_monitor\tests\test_alert_system.py" />
     <Compile Include="ai_production_monitor\tests\test_cycle_comparator.py" />
+    <Compile Include="ai_production_monitor\tests\test_point_tracker_cycle_integration.py" />
     <Compile Include="ai_production_monitor\tests\test_point_trigger_detector.py" />
     <Compile Include="ai_production_monitor\test_calibration.py" />
     <Compile Include="ai_production_monitor\test_camera_screen.py" />
