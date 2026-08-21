@@ -44,6 +44,7 @@ from core.point_trigger_detector import (
 )
 from data.config_handler import ConfigHandler
 from vision.camera_handler import CameraManager, camera_manager_from_config
+from vision.skeleton_overlay import landmarks_to_pixels
 
 
 # สีแสดงสถานะต่างๆ บน overlay (BGR)
@@ -89,6 +90,12 @@ class PointTrackerThread(QThread):
 
     cycle_trajectory_ready = pyqtSignal(list)
     # list of dict {x,y,timestamp,t_norm}
+
+    # Visual-only: emits list of (x, y) pixel tuples for the 21 hand landmarks.
+    # NOTE: trigger logic uses ONLY hand_position_updated / point_triggered.
+    # This signal is consumed exclusively by the skeleton overlay renderer.
+    hand_skeleton_updated = pyqtSignal(list)
+    # list of (float, float) pixel coords, length 21 when hand detected, [] otherwise
 
     def __init__(
         self,
@@ -180,6 +187,15 @@ class PointTrackerThread(QThread):
             _consecutive_fails = 0
 
             result = self._detector.process_frame(frame)
+
+            # Emit skeleton landmarks (visual-only — no trigger logic here)
+            if result.full_landmarks:
+                h, w = frame.shape[:2]
+                self.hand_skeleton_updated.emit(
+                    landmarks_to_pixels(result.full_landmarks, w, h)
+                )
+            else:
+                self.hand_skeleton_updated.emit([])
 
             # Annotate frame สำหรับแสดงผล
             annotated = self._annotate(frame, result)

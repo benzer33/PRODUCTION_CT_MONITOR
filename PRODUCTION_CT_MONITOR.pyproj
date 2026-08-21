@@ -61,6 +61,7 @@
     <Compile Include="ai_production_monitor\vision\camera_handler.py" />
     <Compile Include="ai_production_monitor\vision\hand_tracker.py" />
     <Compile Include="ai_production_monitor\vision\point_tracker_thread.py" />
+    <Compile Include="ai_production_monitor\vision\skeleton_overlay.py" />
     <Compile Include="ai_production_monitor\vision\__init__.py" />
     <Compile Include="ai_production_monitor\__init__.py" />
     <Compile Include="PRODUCTION_CT_MONITOR.py" />

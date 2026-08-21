@@ -35,6 +35,13 @@ from core.ghost_interpolator import (
     interpolate_ghost_position,
     scale_to_widget,
 )
+from vision.skeleton_overlay import (
+    HAND_CONNECTIONS,
+    SKELETON_JOINT_COLOR,
+    SKELETON_JOINT_RADIUS,
+    SKELETON_LINE_COLOR,
+    SKELETON_LINE_WIDTH,
+)
 
 from core.cycle_tracker import CycleTracker, CycleRecord
 from core.dtw_comparator import GoldenReference
@@ -182,6 +189,10 @@ class GhostOverlayWidget(QWidget):
         # Trail: deque of (wx, wy) — newest at right
         self._trail: deque[tuple[float, float]] = deque(maxlen=_TRAIL_MAX)
 
+        # Skeleton: list of widget-space (wx, wy) for 21 landmarks, or []
+        self._skeleton_pts: list[tuple[float, float]] = []
+        self._show_skeleton: bool = True
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -201,11 +212,24 @@ class GhostOverlayWidget(QWidget):
         self._clamped = clamped
         self.update()
 
+    def set_skeleton(self, pts: list[tuple[float, float]]) -> None:
+        """Push new widget-space skeleton landmark positions and trigger repaint."""
+        self._skeleton_pts = pts
+        self.update()
+
+    def set_show_skeleton(self, visible: bool) -> None:
+        """Toggle skeleton layer without hiding the whole overlay widget."""
+        self._show_skeleton = visible
+        if not visible:
+            self._skeleton_pts = []
+        self.update()
+
     def reset(self) -> None:
-        """Clear trail and ghost position (call when session stops)."""
+        """Clear trail, ghost position, and skeleton (call when session stops)."""
         self._trail.clear()
         self._delta_sec = None
         self._clamped = False
+        self._skeleton_pts = []
         self.update()
 
     # ------------------------------------------------------------------
@@ -213,47 +237,71 @@ class GhostOverlayWidget(QWidget):
     # ------------------------------------------------------------------
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        if not self._trail and self._delta_sec is None:
+        has_skeleton = self._show_skeleton and len(self._skeleton_pts) == 21
+        has_ghost    = self._trail or self._delta_sec is not None
+        if not has_skeleton and not has_ghost:
             return  # nothing to draw yet
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
 
-        # --- Trail ---
-        n = len(self._trail)
-        for i, (tx, ty) in enumerate(self._trail):
-            # alpha fades from very faint (oldest) to moderate (newest)
-            alpha = int(20 + 120 * (i / max(n - 1, 1)))
-            color = QColor(0, 200, 83, alpha)   # green
+        # --- Hand skeleton layer (cyan, drawn first so ghost renders on top) ---
+        if has_skeleton:
+            pts = self._skeleton_pts
+            lc = QColor(*SKELETON_LINE_COLOR)
+            jc = QColor(*SKELETON_JOINT_COLOR)
+
+            # Edges
+            pen = QPen(lc, SKELETON_LINE_WIDTH, Qt.SolidLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            for a, b in HAND_CONNECTIONS:
+                if a < len(pts) and b < len(pts):
+                    painter.drawLine(QPointF(*pts[a]), QPointF(*pts[b]))
+
+            # Joints
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(color))
-            radius = max(2, int(_GHOST_RADIUS * 0.5 * (i / max(n - 1, 1))))
-            painter.drawEllipse(QPointF(tx, ty), radius, radius)
+            painter.setBrush(QBrush(jc))
+            for px, py in pts:
+                painter.drawEllipse(QPointF(px, py),
+                                    SKELETON_JOINT_RADIUS, SKELETON_JOINT_RADIUS)
 
-        # --- Main ghost circle (dashed border, semi-transparent fill) ---
-        fill_color = QColor(0, 200, 83, 80)     # semi-transparent green
-        border_color = QColor(0, 230, 118, 220) # bright green border
+        # --- Ghost trail + circle + delta label ---
+        if has_ghost:
+            n = len(self._trail)
+            for i, (tx, ty) in enumerate(self._trail):
+                # alpha fades from very faint (oldest) to moderate (newest)
+                alpha = int(20 + 120 * (i / max(n - 1, 1)))
+                color = QColor(0, 200, 83, alpha)   # green
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(color))
+                radius = max(2, int(_GHOST_RADIUS * 0.5 * (i / max(n - 1, 1))))
+                painter.drawEllipse(QPointF(tx, ty), radius, radius)
 
-        pen = QPen(border_color, 2, Qt.DashLine)
-        painter.setPen(pen)
-        painter.setBrush(QBrush(fill_color))
-        painter.drawEllipse(QPointF(self._wx, self._wy), _GHOST_RADIUS, _GHOST_RADIUS)
+            # --- Main ghost circle (dashed border, semi-transparent fill) ---
+            fill_color = QColor(0, 200, 83, 80)     # semi-transparent green
+            border_color = QColor(0, 230, 118, 220) # bright green border
 
-        # --- Delta label ---
-        if self._delta_sec is not None:
-            sign = "+" if self._delta_sec >= 0 else "-"
-            label = f"{sign}{abs(self._delta_sec):.1f}s"
-            # Red when behind (positive delta = slow), green when ahead
-            text_color = QColor("#ff1744") if self._delta_sec > 0 else QColor("#00e676")
-            painter.setPen(text_color)
-            font = QFont("Consolas", 9, QFont.Bold)
-            painter.setFont(font)
-            # Position label just to the right and slightly above the circle
-            painter.drawText(
-                int(self._wx + _GHOST_RADIUS + 4),
-                int(self._wy - 4),
-                label,
-            )
+            pen = QPen(border_color, 2, Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QBrush(fill_color))
+            painter.drawEllipse(QPointF(self._wx, self._wy), _GHOST_RADIUS, _GHOST_RADIUS)
+
+            # --- Delta label ---
+            if self._delta_sec is not None:
+                sign = "+" if self._delta_sec >= 0 else "-"
+                label = f"{sign}{abs(self._delta_sec):.1f}s"
+                # Red when behind (positive delta = slow), green when ahead
+                text_color = QColor("#ff1744") if self._delta_sec > 0 else QColor("#00e676")
+                painter.setPen(text_color)
+                font = QFont("Consolas", 9, QFont.Bold)
+                painter.setFont(font)
+                # Position label just to the right and slightly above the circle
+                painter.drawText(
+                    int(self._wx + _GHOST_RADIUS + 4),
+                    int(self._wy - 4),
+                    label,
+                )
 
         painter.end()
 
@@ -342,8 +390,10 @@ class MonitorScreen(QWidget):
         # Ghost overlay — transparent child widget, resized in resizeEvent
         self._ghost_overlay = GhostOverlayWidget(self._video)
         self._ghost_overlay.resize(self._video.size())
-        # Visibility follows the persisted config setting
-        if self._config.get_show_ghost():
+        # Sync skeleton visibility from persisted config
+        self._ghost_overlay.set_show_skeleton(self._config.get_show_skeleton())
+        # Overlay widget visibility follows ghost toggle (skeleton is a layer inside)
+        if self._config.get_show_ghost() or self._config.get_show_skeleton():
             self._ghost_overlay.show()
         else:
             self._ghost_overlay.hide()
@@ -356,6 +406,14 @@ class MonitorScreen(QWidget):
         self._chk_ghost.setChecked(self._config.get_show_ghost())
         self._chk_ghost.toggled.connect(self._on_ghost_toggled)
         ghost_row.addWidget(self._chk_ghost)
+
+        self._chk_skeleton = QCheckBox("แสดงโครงมือ  (Show Hand Skeleton)")
+        self._chk_skeleton.setFont(make_font(FONT_SIZE_LABEL))
+        self._chk_skeleton.setStyleSheet("color: #4dd0e1;")
+        self._chk_skeleton.setChecked(self._config.get_show_skeleton())
+        self._chk_skeleton.toggled.connect(self._on_skeleton_toggled)
+        ghost_row.addWidget(self._chk_skeleton)
+
         ghost_row.addStretch()
         video_col.addLayout(ghost_row)
 
@@ -462,6 +520,7 @@ class MonitorScreen(QWidget):
         self._tracker_thread = PointTrackerThread(self._config, trigger_points)
         self._tracker_thread.frame_ready.connect(self._video.set_frame)
         self._tracker_thread.frame_ready.connect(self._on_frame_for_ghost)
+        self._tracker_thread.hand_skeleton_updated.connect(self._on_skeleton_updated)
         self._tracker_thread.error_occurred.connect(self._on_error)
         self._tracker_thread.point_triggered.connect(self._on_point_triggered)
         self._tracker_thread.point_state_changed.connect(self._on_point_state_changed)
@@ -489,13 +548,48 @@ class MonitorScreen(QWidget):
     # ------------------------------------------------------------------
 
     def _on_ghost_toggled(self, checked: bool) -> None:
-        """Persist toggle and show/hide overlay immediately."""
+        """Persist toggle and show/hide ghost layer. Overlay widget stays
+        visible if the skeleton layer is still active."""
         self._config.set_show_ghost(checked)
         if not checked:
             self._ghost_overlay.reset()
-            self._ghost_overlay.hide()
+            # Only hide the widget entirely when both layers are off
+            if not self._chk_skeleton.isChecked():
+                self._ghost_overlay.hide()
         else:
             self._ghost_overlay.show()
+
+    def _on_skeleton_toggled(self, checked: bool) -> None:
+        """Persist skeleton toggle and enable/disable the skeleton layer."""
+        self._config.set_show_skeleton(checked)
+        self._ghost_overlay.set_show_skeleton(checked)
+        if checked:
+            self._ghost_overlay.show()
+        elif not self._chk_ghost.isChecked():
+            # Hide the overlay widget only when both layers are off
+            self._ghost_overlay.hide()
+
+    def _on_skeleton_updated(self, frame_pts: list) -> None:
+        """Receive 21 frame-pixel landmark positions and scale to widget space."""
+        if not self._chk_skeleton.isChecked():
+            return
+        if not frame_pts:
+            self._ghost_overlay.set_skeleton([])
+            return
+        fw = self._last_frame_w or self._video.width()
+        fh = self._last_frame_h or self._video.height()
+        if fw <= 0 or fh <= 0:
+            return
+        scale = min(self._video.width() / fw, self._video.height() / fh)
+        scaled_w = fw * scale
+        scaled_h = fh * scale
+        off_x = (self._video.width()  - scaled_w) / 2.0
+        off_y = (self._video.height() - scaled_h) / 2.0
+        widget_pts = [
+            (off_x + x * scale, off_y + y * scale)
+            for x, y in frame_pts
+        ]
+        self._ghost_overlay.set_skeleton(widget_pts)
 
     def _on_frame_for_ghost(self, frame) -> None:
         """Called on every new frame — resize overlay to match VideoWidget

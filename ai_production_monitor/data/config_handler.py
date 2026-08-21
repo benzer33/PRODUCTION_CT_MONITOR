@@ -214,3 +214,12 @@ class ConfigHandler:
         """Persist ghost overlay toggle across sessions."""
         self._data.setdefault("ui", {})["show_ghost_overlay"] = bool(value)
         self.save()
+
+    def get_show_skeleton(self) -> bool:
+        """Return whether the hand skeleton overlay is enabled (default: True)."""
+        return bool(self._data.get("ui", {}).get("show_hand_skeleton", True))
+
+    def set_show_skeleton(self, value: bool) -> None:
+        """Persist hand skeleton overlay toggle across sessions."""
+        self._data.setdefault("ui", {})["show_hand_skeleton"] = bool(value)
+        self.save()

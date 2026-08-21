@@ -431,6 +431,10 @@ class FrameResult:
     state_changes:    list[PointUpdateResult]       # การเปลี่ยน state ทุกจุด
     point_states:     dict[int, PointState]         # สถานะปัจจุบันทุกจุด
     timestamp:        float
+    # Visual-only: raw MediaPipe landmark list (21 points) for skeleton overlay.
+    # NOTE: core trigger logic uses ONLY hand_x/hand_y above — this field is
+    # strictly for the GUI rendering layer and must never influence trigger state.
+    full_landmarks:   list = None  # list of mediapipe NormalizedLandmark objects
 
 
 class PointTriggerDetector:
@@ -594,6 +598,7 @@ class PointTriggerDetector:
             state_changes    = state_changes,
             point_states     = {pid: m.state for pid, m in self._machines.items()},
             timestamp        = ts,
+            full_landmarks   = hand_result.landmarks if hand_result.detected else [],
         )
 
     def _process_hand_position(

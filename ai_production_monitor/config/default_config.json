@@ -4985,6 +4985,8 @@
       40,
       40
     ],
-    "font_family": "Consolas"
+    "font_family": "Consolas",
+    "show_hand_skeleton": true,
+    "show_ghost_overlay": true
   }
 }
