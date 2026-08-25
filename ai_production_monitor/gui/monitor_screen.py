@@ -717,24 +717,31 @@ class MonitorScreen(QWidget):
             self._cycle_tracker.on_zone_event(point_id, "enter", handedness)
             self._cycle_tracker.tick(hand_x, hand_y)
 
-    def _on_point_state_changed(self, point_id: int, state_name: str) -> None:
+    def _on_point_state_changed(self, point_id: int, state_name: str,
+                                handedness: str = "") -> None:
         """Update state HUD and relay zone exit to CycleTracker.
 
         The ACTIVE → COOLDOWN transition means the hand has left the point
         after a confirmed trigger — this is the semantic equivalent of a zone
         'exit' event that CycleTracker needs to advance the cycle state
         machine and eventually call _complete_cycle().
+
+        _prev_point_states is keyed by (point_id, handedness) so that two
+        hands working the same zone simultaneously cannot overwrite each
+        other's previous state and cause missed or spurious exit events.
         """
-        prev = self._prev_point_states.get(point_id, "")
-        self._prev_point_states[point_id] = state_name
+        key  = (point_id, handedness)
+        prev = self._prev_point_states.get(key, "")
+        self._prev_point_states[key] = state_name
 
         # Detect hand-left-point: ACTIVE → COOLDOWN
         if prev == "ACTIVE" and state_name == "COOLDOWN":
             if self._cycle_tracker:
                 self._cycle_tracker.on_zone_event(point_id, "exit")
 
-        # HUD update
-        self._lbl_state.setText(f"P{point_id}:{state_name}")
+        # HUD update — show hand initial so operator can see which hand
+        hand_tag = f"({handedness[0]})" if handedness else ""
+        self._lbl_state.setText(f"P{point_id}{hand_tag}:{state_name}")
         armed_states = {"ARMED", "TRIGGERED_PENDING", "ACTIVE"}
         color = "#00c853" if state_name in armed_states else "#607d8b"
         self._lbl_state.setStyleSheet(

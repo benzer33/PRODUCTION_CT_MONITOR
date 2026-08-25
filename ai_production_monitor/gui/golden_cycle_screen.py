@@ -400,16 +400,23 @@ class GoldenCycleScreen(QWidget):
             self._cycle_tracker.on_zone_event(point_id, "enter", handedness)
             self._cycle_tracker.tick(hand_x, hand_y)
 
-    def _on_point_state_changed(self, point_id: int, state_name: str) -> None:
-        """Relay zone exit to CycleTracker on ACTIVE → COOLDOWN transition."""
-        prev = self._prev_point_states.get(point_id, "")
-        self._prev_point_states[point_id] = state_name
+    def _on_point_state_changed(self, point_id: int, state_name: str,
+                                handedness: str = "") -> None:
+        """Relay zone exit to CycleTracker on ACTIVE → COOLDOWN transition.
+
+        _prev_point_states is keyed by (point_id, handedness) so that two
+        hands at the same zone cannot overwrite each other's previous state.
+        """
+        key  = (point_id, handedness)
+        prev = self._prev_point_states.get(key, "")
+        self._prev_point_states[key] = state_name
 
         if prev == "ACTIVE" and state_name == "COOLDOWN":
             if self._cycle_tracker:
                 self._cycle_tracker.on_zone_event(point_id, "exit")
 
-        self._lbl_state.setText(f"STATE: P{point_id}:{state_name}")
+        hand_tag = f"({handedness[0]})" if handedness else ""
+        self._lbl_state.setText(f"STATE: P{point_id}{hand_tag}:{state_name}")
 
     def _on_hand_position(self, hand_x: float, hand_y: float) -> None:
         if self._cycle_tracker:

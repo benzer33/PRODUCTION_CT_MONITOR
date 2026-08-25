@@ -220,7 +220,7 @@ class TestFullCycleIntegration:
             on_trigger       = lambda pid, ts, pos, hand="": bridge.on_point_triggered(
                 pid, ts, pos[0], pos[1]
             ),
-            on_state_change  = lambda pid, state: bridge.on_point_state_changed(
+            on_state_change  = lambda pid, state, hand="": bridge.on_point_state_changed(
                 pid, state.name
             ),
         )
@@ -286,7 +286,7 @@ class TestFullCycleIntegration:
             on_trigger      = lambda pid, ts, pos, hand="": bridge.on_point_triggered(
                 pid, ts, pos[0], pos[1]
             ),
-            on_state_change = lambda pid, state: bridge.on_point_state_changed(
+            on_state_change = lambda pid, state, hand="": bridge.on_point_state_changed(
                 pid, state.name
             ),
         )

@@ -520,7 +520,7 @@ class PointTriggerDetector:
     Callbacks (สำหรับส่งข้อมูลออก):
     ─────────────────────────────────
     on_trigger(point_id, timestamp, (x, y))  — เมื่อ trigger ยืนยัน
-    on_state_change(point_id, new_state)     — เมื่อ state เปลี่ยน
+    on_state_change(point_id, new_state, handedness) — เมื่อ state เปลี่ยน
     on_hand_position(x, y)                  — ทุกเฟรมที่มีมือ
     """
 
@@ -535,7 +535,7 @@ class PointTriggerDetector:
         clear_confirm:    int = 8,
         use_palm_centroid: bool = True,
         on_trigger:       Optional[Callable] = None,  # (point_id, ts, pos, handedness)
-        on_state_change:  Optional[Callable[[int, PointState], None]]   = None,
+        on_state_change:  Optional[Callable] = None,  # (point_id, new_state, handedness)
         on_hand_position: Optional[Callable[[float, float], None]]      = None,
     ) -> None:
         self._points          = {p.point_id: p for p in trigger_points}
@@ -577,7 +577,7 @@ class PointTriggerDetector:
             def _make_state_cb(point_id, handedness):
                 def _cb(p_id, new_state):
                     if self._on_state_change:
-                        self._on_state_change(p_id, new_state)
+                        self._on_state_change(p_id, new_state, handedness)
                 return _cb
 
             machine._on_trigger = _make_trigger_cb(_pid, _hand)

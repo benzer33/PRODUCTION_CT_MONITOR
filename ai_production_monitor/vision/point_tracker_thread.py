@@ -83,8 +83,8 @@ class PointTrackerThread(QThread):
     hand_position_updated = pyqtSignal(float, float)
     # (x, y) ทุกเฟรมที่มีมือ
 
-    point_state_changed   = pyqtSignal(int, str)
-    # (point_id, state_name)
+    point_state_changed   = pyqtSignal(int, str, str)
+    # (point_id, state_name, handedness)
 
     frame_ready           = pyqtSignal(object)
     # np.ndarray BGR annotated
@@ -228,10 +228,11 @@ class PointTrackerThread(QThread):
 
     def _cb_state_change(
         self,
-        point_id: int,
-        new_state: PointState,
+        point_id:   int,
+        new_state:  PointState,
+        handedness: str = "",
     ) -> None:
-        self.point_state_changed.emit(point_id, new_state.name)
+        self.point_state_changed.emit(point_id, new_state.name, handedness)
 
     def _cb_hand_pos(self, x: float, y: float) -> None:
         self.hand_position_updated.emit(x, y)
