@@ -332,8 +332,16 @@ class MonitorScreen(QWidget):
         self._cycle_id:   int | None = None
         self._cycle_number = 0
 
-        # Track previous state per point to detect ACTIVE → COOLDOWN transition
+        # Track previous state per point to detect ACTIVE → COOLDOWN transition.
+        # Two separate dicts with different purposes:
+        #   _prev_point_states          – keyed by point_id only; used for cycle-exit
+        #                                  detection (union of both hands so that an
+        #                                  unstable handedness label mid-exit cannot
+        #                                  silently swallow the exit event).
+        #   _prev_point_states_by_hand  – keyed by (point_id, handedness); used only
+        #                                  for HUD display so the label stays per-hand.
         self._prev_point_states: dict[int, str] = {}
+        self._prev_point_states_by_hand: dict[tuple[int, str], str] = {}
 
         # Aggregate stats
         self._total = self._pass = self._fail = self._seq_err = 0
@@ -495,7 +503,8 @@ class MonitorScreen(QWidget):
         self._cycle_times = []
         self._all_cycle_records = []
         self._cycle_number = 0
-        self._prev_point_states = {}   # reset prev-state tracker
+        self._prev_point_states = {}           # reset prev-state tracker
+        self._prev_point_states_by_hand = {}
 
         # Build trigger points from config (polygon centroid adapter)
         trigger_points = _trigger_points_from_config(self._config)
@@ -538,7 +547,8 @@ class MonitorScreen(QWidget):
             self._tracker_thread.stop()
             self._tracker_thread = None
         self._cycle_tracker = None
-        self._prev_point_states = {}   # clear stale states
+        self._prev_point_states = {}           # clear stale states
+        self._prev_point_states_by_hand = {}
         self._ghost_overlay.reset()
 
         if self._session_id:
@@ -721,25 +731,51 @@ class MonitorScreen(QWidget):
                                 handedness: str = "") -> None:
         """Update state HUD and relay zone exit to CycleTracker.
 
-        The ACTIVE → COOLDOWN transition means the hand has left the point
-        after a confirmed trigger — this is the semantic equivalent of a zone
-        'exit' event that CycleTracker needs to advance the cycle state
-        machine and eventually call _complete_cycle().
+        Two concerns are kept strictly separate:
 
-        _prev_point_states is keyed by (point_id, handedness) so that two
-        hands working the same zone simultaneously cannot overwrite each
-        other's previous state and cause missed or spurious exit events.
+        (a) CYCLE EXIT DETECTION — keyed by point_id only (no handedness).
+            We treat the point as ACTIVE if *any* hand reported ACTIVE there.
+            This means an unstable MediaPipe label that flips from "Right" to
+            "Left" on the exit frame cannot cause a missed exit event, because
+            the transition is detected at the point level, not the hand level.
+            NOTE: MediaPipe hand labels are known to be unstable during wrist
+            rotation or when hands cross — do NOT tighten this to per-hand
+            keying for cycle progression logic.
+
+        (b) HUD DISPLAY — keyed by (point_id, handedness) so the label
+            correctly shows which hand is currently doing what (P1(L):ACTIVE).
+            This is display-only and has no effect on cycle state.
         """
-        key  = (point_id, handedness)
-        prev = self._prev_point_states.get(key, "")
-        self._prev_point_states[key] = state_name
+        # ── (a) cycle-exit detection ──────────────────────────────────────
+        prev_any = self._prev_point_states.get(point_id, "")
 
-        # Detect hand-left-point: ACTIVE → COOLDOWN
-        if prev == "ACTIVE" and state_name == "COOLDOWN":
+        if state_name == "ACTIVE":
+            # Any hand going ACTIVE promotes the point-level state to ACTIVE.
+            self._prev_point_states[point_id] = "ACTIVE"
+        elif state_name == "COOLDOWN":
+            # Only write COOLDOWN at the point level when no other hand is
+            # still in ACTIVE at this same point.
+            other_active = any(
+                s == "ACTIVE"
+                for (pid, _hand), s in self._prev_point_states_by_hand.items()
+                if pid == point_id and _hand != handedness
+            )
+            if not other_active:
+                self._prev_point_states[point_id] = "COOLDOWN"
+        else:
+            # ARMED / TRIGGERED_PENDING / IDLE — only write if the point is
+            # not already held at ACTIVE by some hand.
+            if self._prev_point_states.get(point_id, "") != "ACTIVE":
+                self._prev_point_states[point_id] = state_name
+
+        # Fire exit event on the point-level ACTIVE → COOLDOWN edge.
+        if prev_any == "ACTIVE" and self._prev_point_states.get(point_id) == "COOLDOWN":
             if self._cycle_tracker:
                 self._cycle_tracker.on_zone_event(point_id, "exit")
 
-        # HUD update — show hand initial so operator can see which hand
+        # ── (b) HUD display — per-hand ────────────────────────────────────
+        self._prev_point_states_by_hand[(point_id, handedness)] = state_name
+
         hand_tag = f"({handedness[0]})" if handedness else ""
         self._lbl_state.setText(f"P{point_id}{hand_tag}:{state_name}")
         armed_states = {"ARMED", "TRIGGERED_PENDING", "ACTIVE"}

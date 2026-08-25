@@ -217,29 +217,94 @@ class TestCycleTrackerHandedness:
 
 
 # ---------------------------------------------------------------------------
-# Regression: overlapping dual-hand transitions at the same point
+# Regression: overlapping dual-hand transitions and unstable label handling
 # ---------------------------------------------------------------------------
 
 class TestStateChangedHandednessKey:
-    """Verify that on_state_change now carries handedness so that two hands
-    working the same point near-simultaneously cannot overwrite each other's
-    previous-state cache key.
+    """Verify the two-dict state-tracking logic used by monitor_screen.
 
-    Scenario
-    --------
-    - Left  hand: ARMED → ACTIVE → COOLDOWN   (trigger + exit)
-    - Right hand: overlaps with ACTIVE while Left is still in its own ACTIVE
-      phase, then transitions to COOLDOWN independently.
+    monitor_screen._on_point_state_changed now keeps two separate caches:
+      - _prev_point_states        keyed by point_id  → drives cycle exit
+      - _prev_point_states_by_hand keyed by (point_id, hand) → HUD display
 
-    Expected: 2 distinct exit events captured, one per hand.
-    The exit for Left must never be suppressed by Right's activity, and
-    vice versa.
+    This class exercises both concerns using the same logic extracted as a
+    pure-Python helper so no PyQt5 / camera is required.
     """
+
+    # ------------------------------------------------------------------
+    # Helpers that mirror monitor_screen._on_point_state_changed exactly
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _simulate(
+        state_log: list[tuple[int, str, str]],
+    ) -> list[int]:
+        """Simulate the new two-dict logic; return list of point_ids for which
+        an exit event was fired (one entry per firing, duplicates allowed if a
+        point fires more than once).
+        """
+        prev_point:    dict[int, str]              = {}
+        prev_by_hand:  dict[tuple[int, str], str]  = {}
+        exits:         list[int]                   = []
+
+        for pid, state_name, hand in state_log:
+            if state_name == "ACTIVE":
+                prev_point[pid] = "ACTIVE"
+            elif state_name == "COOLDOWN":
+                other_active = any(
+                    s == "ACTIVE"
+                    for (p, h), s in prev_by_hand.items()
+                    if p == pid and h != hand
+                )
+                if not other_active:
+                    prev_point[pid] = "COOLDOWN"
+            else:
+                if prev_point.get(pid, "") != "ACTIVE":
+                    prev_point[pid] = state_name
+
+            prev_was_active = prev_point.get(pid) == "COOLDOWN" and \
+                              (pid not in prev_point or True)  # checked below
+
+            prev_by_hand[(pid, hand)] = state_name
+
+        # Re-run properly (the helper above has a logic ordering issue for
+        # the exit check — redo cleanly).
+        prev_point   = {}
+        prev_by_hand = {}
+        exits        = []
+
+        for pid, state_name, hand in state_log:
+            prev_any = prev_point.get(pid, "")
+
+            if state_name == "ACTIVE":
+                prev_point[pid] = "ACTIVE"
+            elif state_name == "COOLDOWN":
+                other_active = any(
+                    s == "ACTIVE"
+                    for (p, h), s in prev_by_hand.items()
+                    if p == pid and h != hand
+                )
+                if not other_active:
+                    prev_point[pid] = "COOLDOWN"
+            else:
+                if prev_point.get(pid, "") != "ACTIVE":
+                    prev_point[pid] = state_name
+
+            if prev_any == "ACTIVE" and prev_point.get(pid) == "COOLDOWN":
+                exits.append(pid)
+
+            prev_by_hand[(pid, hand)] = state_name
+
+        return exits
+
+    # ------------------------------------------------------------------
+    # Tests
+    # ------------------------------------------------------------------
 
     def _make_detector(self):
         p1 = TriggerPoint(id=1, x=100.0, y=100.0, radius=40.0)
-        state_log: list[tuple[int, str, str]] = []
-        trigger_log: list[tuple[int, str]] = []
+        state_log:   list[tuple[int, str, str]] = []
+        trigger_log: list[tuple[int, str]]      = []
 
         detector = PointTriggerDetector(
             trigger_points  = [p1],
@@ -255,124 +320,111 @@ class TestStateChangedHandednessKey:
         detector.start()
         return detector, state_log, trigger_log
 
-    # Simulate the _prev_point_states keying behaviour that lives in the GUI,
-    # mirroring monitor_screen._on_point_state_changed, to assert correctness
-    # of the fix without requiring PyQt5.
-    @staticmethod
-    def _simulate_prev_states(
-        state_log: list[tuple[int, str, str]],
-    ) -> list[tuple[int, str]]:
-        """Return exit events as (point_id, handedness) pairs.
-
-        Uses (point_id, handedness) as key — the post-fix behaviour — and
-        returns one entry per ACTIVE→COOLDOWN edge.
-        """
-        prev: dict[tuple[int, str], str] = {}
-        exits: list[tuple[int, str]] = []
-        for pid, state_name, hand in state_log:
-            key = (pid, hand)
-            if prev.get(key, "") == "ACTIVE" and state_name == "COOLDOWN":
-                exits.append((pid, hand))
-            prev[key] = state_name
-        return exits
-
-    @staticmethod
-    def _simulate_prev_states_broken(
-        state_log: list[tuple[int, str, str]],
-    ) -> list[tuple[int, str]]:
-        """Same but uses only point_id as key — the pre-fix (broken) behaviour."""
-        prev: dict[int, str] = {}
-        exits: list[tuple[int, str]] = []
-        for pid, state_name, hand in state_log:
-            if prev.get(pid, "") == "ACTIVE" and state_name == "COOLDOWN":
-                exits.append((pid, hand))
-            prev[pid] = state_name
-        return exits
-
-    def test_two_hands_same_point_each_gets_own_exit_event(self):
-        """Both hands must produce an independent exit event; neither is lost."""
-        detector, state_log, _ = self._make_detector()
-
-        L = detector.get_machine(1, "Left")
-        R = detector.get_machine(1, "Right")
-
-        # Clear both machines first
-        for _ in range(4):
-            L.update(on_point=False, hand_pos=(200.0, 200.0))
-            R.update(on_point=False, hand_pos=(200.0, 200.0))
-
-        state_log.clear()
-
-        # Left enters and triggers
-        for _ in range(3):
-            L.update(on_point=True, hand_pos=(100.0, 100.0))
-
-        # Right enters and triggers while Left is still ACTIVE
-        for _ in range(3):
-            R.update(on_point=True, hand_pos=(100.0, 100.0))
-
-        # Left exits first → COOLDOWN
-        L.update(on_point=False, hand_pos=(200.0, 200.0))
-
-        # Right exits → COOLDOWN
-        R.update(on_point=False, hand_pos=(200.0, 200.0))
-
-        # Verify both hands reached COOLDOWN (i.e. triggered and exited)
-        left_states  = [s for pid, s, h in state_log if h == "Left"]
-        right_states = [s for pid, s, h in state_log if h == "Right"]
-        assert "COOLDOWN" in left_states,  "Left hand should reach COOLDOWN"
-        assert "COOLDOWN" in right_states, "Right hand should reach COOLDOWN"
-
-        # Fixed keying produces 2 exit events (one per hand)
-        exits_fixed  = self._simulate_prev_states(state_log)
-        assert len(exits_fixed) == 2, (
-            f"Expected 2 exit events (one per hand), got {exits_fixed}"
-        )
-        assert (1, "Left")  in exits_fixed
-        assert (1, "Right") in exits_fixed
-
-    def test_broken_keying_would_lose_exit_event(self):
-        """Demonstrate that the OLD single-key approach CAN drop an exit event
-        when the two hands interleave at the same point.
-
-        This test is deliberately asserting the broken behaviour to document
-        WHY the fix was needed.  If the detector emits states in a particular
-        interleaved order, a point_id-only key loses the Left exit event.
-        """
-        # Manually craft a state_log that represents the race condition:
-        # Right's ACTIVE arrives between Left's ACTIVE and Left's COOLDOWN,
-        # overwriting the prev-state so Left's COOLDOWN is no longer preceded
-        # by ACTIVE in the prev dict.
-        interleaved_log = [
-            (1, "ACTIVE",   "Left"),   # Left goes ACTIVE
-            (1, "ACTIVE",   "Right"),  # Right goes ACTIVE — overwrites prev[1]
-            (1, "COOLDOWN", "Left"),   # Left exits — but prev[1] == "ACTIVE" (Right's)
-            (1, "COOLDOWN", "Right"),  # Right exits
+    def test_single_hand_normal_exit_fires_once(self):
+        """Normal single-hand cycle: ACTIVE → COOLDOWN must fire exactly 1 exit."""
+        log = [
+            (1, "ARMED",    "Right"),
+            (1, "ACTIVE",   "Right"),
+            (1, "COOLDOWN", "Right"),
         ]
-        exits_fixed  = self._simulate_prev_states(interleaved_log)
-        exits_broken = self._simulate_prev_states_broken(interleaved_log)
+        exits = self._simulate(log)
+        assert exits == [1], f"Expected exactly 1 exit for point 1, got {exits}"
 
-        # Fixed: both exits detected
-        assert len(exits_fixed) == 2, f"Fixed should catch both exits: {exits_fixed}"
-        # Broken: might lose one or detect wrong hand's exit
-        # In this specific interleaving Right's ACTIVE overwrites prev[1],
-        # so Left's COOLDOWN is still preceded by ACTIVE in prev[1] — but
-        # if the order were Left:ACTIVE, Right:ACTIVE, Right:COOLDOWN, Left:COOLDOWN
-        # the broken version would only count Right's exit.
-        # We assert they differ to show the fix matters for some orderings.
-        interleaved_log_v2 = [
+    def test_label_flip_on_exit_does_not_lose_exit_event(self):
+        """Regression: MediaPipe label flips from 'Right' (ACTIVE) to 'Left'
+        (COOLDOWN) on the exit frame — the exit event must still be fired.
+
+        This is the primary bug being fixed: with the old (point_id, hand) key,
+        ACTIVE was stored under ('Right') but COOLDOWN arrived under ('Left'),
+        so the ACTIVE→COOLDOWN edge was never detected and the cycle stalled.
+        """
+        log = [
+            (1, "ARMED",    "Right"),
+            (1, "ACTIVE",   "Right"),   # hand correctly labelled on ACTIVE frame
+            (1, "COOLDOWN", "Left"),    # label flipped on exit frame — the bug
+        ]
+        exits = self._simulate(log)
+        assert len(exits) == 1, (
+            f"Label flip on exit must not suppress the exit event. exits={exits}"
+        )
+        assert exits[0] == 1
+
+    def test_label_flip_other_direction(self):
+        """Same bug, opposite flip direction: Left→Right on exit."""
+        log = [
+            (1, "ACTIVE",   "Left"),
+            (1, "COOLDOWN", "Right"),   # label flipped
+        ]
+        exits = self._simulate(log)
+        assert len(exits) == 1, (
+            f"Left→Right label flip on exit must still produce exit. exits={exits}"
+        )
+
+    def test_two_hands_both_active_exit_fires_once_after_last_hand_leaves(self):
+        """Both hands at the same point: the point-level exit should fire
+        exactly once — only after the LAST active hand has departed.
+
+        Cycle progression is a single-threaded counter; only one exit per
+        point is expected regardless of how many hands were involved.
+        """
+        log = [
+            (1, "ACTIVE",   "Left"),    # Left goes ACTIVE
+            (1, "ACTIVE",   "Right"),   # Right also goes ACTIVE
+            (1, "COOLDOWN", "Left"),    # Left exits — Right still ACTIVE → no exit yet
+            (1, "COOLDOWN", "Right"),   # Right exits — point now clear → exit fires
+        ]
+        exits = self._simulate(log)
+        assert len(exits) == 1, (
+            f"Should fire exactly 1 point-level exit when both hands leave. "
+            f"exits={exits}"
+        )
+        assert exits[0] == 1
+
+    def test_two_hands_both_active_left_exits_first_no_premature_exit(self):
+        """When Left exits but Right is still ACTIVE, no exit must fire yet."""
+        log = [
             (1, "ACTIVE",   "Left"),
             (1, "ACTIVE",   "Right"),
-            (1, "COOLDOWN", "Right"),  # Right exits first — overwrites prev[1]
-            (1, "COOLDOWN", "Left"),   # Left exits — prev[1] is now "COOLDOWN", not "ACTIVE"
+            (1, "COOLDOWN", "Left"),    # Left gone, Right still ACTIVE
         ]
-        exits_broken_v2 = self._simulate_prev_states_broken(interleaved_log_v2)
-        exits_fixed_v2  = self._simulate_prev_states(interleaved_log_v2)
-        # Broken: only 1 exit (Left's is missed)
-        assert len(exits_broken_v2) == 1, (
-            f"Broken keying should miss Left exit in v2 ordering: {exits_broken_v2}"
+        exits = self._simulate(log)
+        assert exits == [], (
+            f"Exit must not fire while any hand is still ACTIVE. exits={exits}"
         )
-        # Fixed: still 2 exits
-        assert len(exits_fixed_v2) == 2, (
-            f"Fixed keying should still catch both exits in v2: {exits_fixed_v2}"
+
+    def test_detector_label_flip_no_lost_exit_via_real_state_machine(self):
+        """End-to-end: drive the real PointTriggerDetector, verify COOLDOWN
+        arrives in state_log, then confirm the two-dict simulate catches it
+        even if we pretend the label flipped.
+        """
+        detector, state_log, _ = self._make_detector()
+        m = detector.get_machine(1, "Right")
+
+        # Clear
+        for _ in range(4):
+            m.update(on_point=False, hand_pos=(200.0, 200.0))
+        state_log.clear()
+
+        # Trigger
+        for _ in range(3):
+            m.update(on_point=True, hand_pos=(100.0, 100.0))
+
+        # Exit
+        m.update(on_point=False, hand_pos=(200.0, 200.0))
+
+        assert any(s == "COOLDOWN" for _, s, _ in state_log), (
+            "Detector must emit COOLDOWN on exit"
+        )
+
+        # Simulate a label flip: replace the handedness on the COOLDOWN entry
+        flipped_log = []
+        for pid, s, h in state_log:
+            if s == "COOLDOWN" and h == "Right":
+                flipped_log.append((pid, s, "Left"))   # pretend label flipped
+            else:
+                flipped_log.append((pid, s, h))
+
+        exits = self._simulate(flipped_log)
+        assert len(exits) == 1, (
+            f"Simulated label flip must not suppress exit. exits={exits}"
         )
