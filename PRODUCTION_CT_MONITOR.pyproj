@@ -54,6 +54,7 @@
     <Compile Include="ai_production_monitor\tests\test_alert_system.py" />
     <Compile Include="ai_production_monitor\tests\test_camera_mirror.py" />
     <Compile Include="ai_production_monitor\tests\test_cycle_comparator.py" />
+    <Compile Include="ai_production_monitor\tests\test_dual_hand_tracking.py" />
     <Compile Include="ai_production_monitor\tests\test_ghost_interpolator.py" />
     <Compile Include="ai_production_monitor\tests\test_point_tracker_cycle_integration.py" />
     <Compile Include="ai_production_monitor\tests\test_point_trigger_detector.py" />
@@ -68,6 +69,7 @@
     <Compile Include="ai_production_monitor\__init__.py" />
     <Compile Include="PRODUCTION_CT_MONITOR.py" />
     <Compile Include="_fix_camera_loop.py" />
+    <Compile Include="_patch_process_frame.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="ai_production_monitor\" />
@@ -88,6 +90,9 @@
     <Content Include="ai_production_monitor\logs\.gitkeep" />
     <Content Include="ai_production_monitor\requirements.txt" />
     <Content Include="START_APP.bat" />
+    <Content Include="_fixtabs.ps1" />
+    <Content Include="_newbody.txt" />
+    <Content Include="_patch.ps1" />
   </ItemGroup>
   <ItemGroup>
     <InterpreterReference Include="Global|PythonCore|3.12" />

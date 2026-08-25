@@ -75,7 +75,10 @@ class PointTrackerThread(QThread):
 
     # ── Qt Signals ──────────────────────────────────────────────────
     point_triggered       = pyqtSignal(int, float, float, float)
-    # (point_id, timestamp, hand_x, hand_y)
+    # (point_id, timestamp, hand_x, hand_y)  — backward-compat signal
+
+    point_triggered_with_hand = pyqtSignal(int, float, float, float, str)
+    # (point_id, timestamp, hand_x, hand_y, handedness)  — Phase-1 dual-hand signal
 
     hand_position_updated = pyqtSignal(float, float)
     # (x, y) ทุกเฟรมที่มีมือ
@@ -216,12 +219,12 @@ class PointTrackerThread(QThread):
         point_id:  int,
         timestamp: float,
         hand_pos:  tuple[float, float],
+        handedness: str = "",
     ) -> None:
-        """เรียกเมื่อ trigger ยืนยัน → emit Qt signal ไป GUI/CycleTracker"""
-        self.point_triggered.emit(
-            point_id, timestamp,
-            float(hand_pos[0]), float(hand_pos[1]),
-        )
+        """Called when a trigger is confirmed → emit Qt signals to GUI/CycleTracker."""
+        x, y = float(hand_pos[0]), float(hand_pos[1])
+        self.point_triggered.emit(point_id, timestamp, x, y)              # backward-compat
+        self.point_triggered_with_hand.emit(point_id, timestamp, x, y, handedness)
 
     def _cb_state_change(
         self,
@@ -246,10 +249,27 @@ class PointTrackerThread(QThread):
 
         if self.show_points and self._detector:
             for pt in self._detector.trigger_points:
-                machine  = self._detector.get_machine(pt.point_id)
+                # Pick the most-active machine across both hands for visual rendering
+                _STATE_PRI = {
+                    PointState.ACTIVE: 6, PointState.TRIGGERED_PENDING: 5,
+                    PointState.ARMED: 4,  PointState.COOLDOWN: 3,
+                    PointState.WAITING_FOR_CLEAR: 2, PointState.IDLE: 1,
+                }
+                machine   = None
+                hand_label = ""
+                for _h in ("Left", "Right"):
+                    _m = self._detector.get_machine(pt.point_id, _h)
+                    if _m is None:
+                        continue
+                    if machine is None or _STATE_PRI.get(_m.state, 0) > _STATE_PRI.get(machine.state, 0):
+                        machine    = _m
+                        hand_label = "L" if _h == "Left" else "R"
                 state    = machine.state if machine else PointState.IDLE
                 color    = _STATE_COLORS.get(state, (100, 100, 100))
                 progress = machine.confirm_progress if machine else 0.0
+                # Show hand suffix only when the zone is actively engaged
+                _active_states = (PointState.ACTIVE, PointState.TRIGGERED_PENDING, PointState.ARMED)
+                hand_suffix = f" ({hand_label})" if machine and state in _active_states else ""
 
                 if pt.has_rect:
                     # ─── Rectangle zone ───────────────────────────────────
@@ -271,7 +291,7 @@ class PointTrackerThread(QThread):
                         cv2.rectangle(out, (x1, y2 - 4), (x1 + bar_w, y2), color, -1)
 
                     # Label (name + state) above the top-left corner
-                    label = f"{pt.name} [{state.name}]"
+                    label = f"{pt.name} [{state.name}]{hand_suffix}"
                     cv2.putText(
                         out, label,
                         (x1, max(y1 - 6, 12)),
@@ -302,7 +322,7 @@ class PointTrackerThread(QThread):
                             int(pt.radius) + 6, progress, color,
                         )
 
-                    label = f"{pt.name} [{state.name}]"
+                    label = f"{pt.name} [{state.name}]{hand_suffix}"
                     cv2.putText(
                         out, label,
                         (int(pt.x) - int(pt.radius), int(pt.y) - int(pt.radius) - 6),

@@ -1,4 +1,4 @@
-"""
+﻿"""
 core/point_trigger_detector.py
 Rising-edge state machine สำหรับตรวจจับการแตะ "จุด trigger" แทนโซนสี่เหลี่ยม
 
@@ -202,6 +202,7 @@ class PointUpdateResult:
     new_state:     PointState
     triggered:     bool    # True ในเฟรมที่ state เปลี่ยนเป็น ACTIVE
     state_changed: bool
+    handedness:    str = ""  # "Left" | "Right" | ""
 
     @property
     def name(self) -> str:
@@ -468,6 +469,20 @@ class TrajectoryRecorder:
 # ============================================================================
 
 @dataclass
+class TriggerEvent:
+    """A single confirmed trigger, carrying which hand fired it.
+
+    NOTE (Phase-2 warning): handedness comes directly from MediaPipe and may
+    flip for 1-3 frames when two hands cross/overlap.  Phase-2 anomaly logic
+    MUST debounce/smooth this field before using it to flag wrong-hand events.
+    """
+    point_id:   int
+    timestamp:  float
+    hand_pos:   tuple   # (x, y) pixel
+    handedness: str     # "Left" | "Right" | ""
+
+
+@dataclass
 class FrameResult:
     """ผลลัพธ์จากการ process 1 frame"""
     hand_detected:    bool
@@ -477,10 +492,19 @@ class FrameResult:
     state_changes:    list[PointUpdateResult]       # การเปลี่ยน state ทุกจุด
     point_states:     dict[int, PointState]         # สถานะปัจจุบันทุกจุด
     timestamp:        float
+    # Phase-1 dual-hand fields
+    trigger_events:       list = None   # list[TriggerEvent] — triggered with handedness
+    point_states_by_hand: dict = None   # dict[(point_id, handedness), PointState]
     # Visual-only: raw MediaPipe landmark list (21 points) for skeleton overlay.
     # NOTE: core trigger logic uses ONLY hand_x/hand_y above — this field is
     # strictly for the GUI rendering layer and must never influence trigger state.
     full_landmarks:   list = None  # list of mediapipe NormalizedLandmark objects
+
+    def __post_init__(self):
+        if self.trigger_events is None:
+            self.trigger_events = []
+        if self.point_states_by_hand is None:
+            self.point_states_by_hand = {}
 
 
 class PointTriggerDetector:
@@ -510,7 +534,7 @@ class PointTriggerDetector:
         trigger_confirm:  int = 5,
         clear_confirm:    int = 8,
         use_palm_centroid: bool = True,
-        on_trigger:       Optional[Callable[[int, float, tuple], None]] = None,
+        on_trigger:       Optional[Callable] = None,  # (point_id, ts, pos, handedness)
         on_state_change:  Optional[Callable[[int, PointState], None]]   = None,
         on_hand_position: Optional[Callable[[float, float], None]]      = None,
     ) -> None:
@@ -522,16 +546,42 @@ class PointTriggerDetector:
         self._on_state_change = on_state_change
         self._on_hand_pos     = on_hand_position
 
-        # สร้าง state machine ต่อจุด
-        self._machines: dict[int, PointStateMachine] = {}
+        # Per-(point_id, handedness) state machines.
+        # Each trigger point has TWO independent machines — one for "Left" and
+        # one for "Right" — so a left-hand trigger does not interfere with the
+        # right-hand state at the same zone.
+        # NOTE (Phase-2 warning): handedness labels from MediaPipe may swap
+        # briefly when hands cross.  Phase-2 logic must debounce before acting.
+        _HANDS = ("Left", "Right")
+        self._machines: dict[tuple, PointStateMachine] = {}
         for p in trigger_points:
-            self._machines[p.point_id] = PointStateMachine(
-                point           = p,
-                trigger_confirm = trigger_confirm,
-                clear_confirm   = clear_confirm,
-                on_trigger_cb   = self._on_trigger,
-                on_state_cb     = self._on_state_change,
-            )
+            for hand in _HANDS:
+                self._machines[(p.point_id, hand)] = PointStateMachine(
+                    point           = p,
+                    trigger_confirm = trigger_confirm,
+                    clear_confirm   = clear_confirm,
+                    on_trigger_cb   = None,   # injected per-hand via closure below
+                    on_state_cb     = None,   # same
+                )
+
+        # Wire per-hand callbacks via closures so handedness is captured
+        for (pid, hand), machine in self._machines.items():
+            _pid, _hand = pid, hand   # capture loop vars
+
+            def _make_trigger_cb(point_id, handedness):
+                def _cb(p_id, ts, pos):
+                    if self._on_trigger:
+                        self._on_trigger(p_id, ts, pos, handedness)
+                return _cb
+
+            def _make_state_cb(point_id, handedness):
+                def _cb(p_id, new_state):
+                    if self._on_state_change:
+                        self._on_state_change(p_id, new_state)
+                return _cb
+
+            machine._on_trigger = _make_trigger_cb(_pid, _hand)
+            machine._on_state   = _make_state_cb(_pid, _hand)
 
         self._trajectory = TrajectoryRecorder()
         self._hand_tracker = None   # lazy init เพื่อไม่โหลด MediaPipe จนกว่าจะใช้
@@ -551,7 +601,7 @@ class PointTriggerDetector:
         self.reset_all()
 
     def reset_all(self) -> None:
-        """Reset state ทุกจุดกลับ WAITING_FOR_CLEAR พร้อมเริ่มรอบใหม่"""
+        """Reset state ทุกจุด (ทุก hand) กลับ WAITING_FOR_CLEAR พร้อมเริ่มรอบใหม่"""
         for machine in self._machines.values():
             machine.reset()
 
@@ -596,56 +646,89 @@ class PointTriggerDetector:
 
         ts = time.monotonic()
 
-        # ── Hand detection ──────────────────────────────────────────
-        hand_result = self._hand_tracker.process(frame)
+        # -- Hand detection (dual-hand) -----------------------------------------
+        # NOTE (Phase-2 warning): MediaPipe may swap Left/Right labels briefly
+        # when hands cross or overlap.  Phase-2 anomaly logic must debounce
+        # handedness before acting on it to avoid false alarms.
+        all_hands = self._hand_tracker.process_all(frame)
 
+        # Map handedness -> HandResult (keep last if duplicate label, very rare)
+        hands_by_side = {}
+        for hr in all_hands:
+            hands_by_side[hr.handedness] = hr
+
+        # Trajectory + hand-position callback driven by the primary (first) hand
+        primary = all_hands[0] if all_hands else None
         hx, hy = 0.0, 0.0
-        if hand_result.detected:
-            if self._use_palm and hand_result.landmarks:
+        primary_landmarks = []
+        if primary and primary.detected:
+            if self._use_palm and primary.landmarks:
                 hx, hy = self._palm_centroid(
-                    hand_result.landmarks,
-                    frame.shape[1],
-                    frame.shape[0],
+                    primary.landmarks, frame.shape[1], frame.shape[0]
                 )
             else:
-                hx, hy = hand_result.x, hand_result.y
-
-            # trajectory recording
+                hx, hy = primary.x, primary.y
+            primary_landmarks = primary.landmarks
             self._trajectory.record(hx, hy)
-
-            # hand position callback
             if self._on_hand_pos:
                 self._on_hand_pos(hx, hy)
 
-        # ── อัปเดต state machine ทุกจุด ─────────────────────────────
-        triggered_points: list[int]         = []
-        state_changes:    list[PointUpdateResult] = []
+        # -- Update per-(point, hand) state machines ----------------------------
+        triggered_points     = []
+        trigger_events       = []
+        state_changes        = []
+        point_states_by_hand = {}
 
-        for pid, machine in self._machines.items():
-            on_pt = (
-                hand_result.detected
-                and machine.point.is_on_point(hx, hy)
-            )
-            result = machine.update(
-                on_point  = on_pt,
-                hand_pos  = (hx, hy),
-                timestamp = ts,
-            )
+        for (pid, hand), machine in self._machines.items():
+            hr_for_hand = hands_by_side.get(hand)
+            if hr_for_hand is not None and hr_for_hand.detected:
+                if self._use_palm and hr_for_hand.landmarks:
+                    _hx, _hy = self._palm_centroid(
+                        hr_for_hand.landmarks, frame.shape[1], frame.shape[0]
+                    )
+                else:
+                    _hx, _hy = hr_for_hand.x, hr_for_hand.y
+                on_pt = machine.point.is_on_point(_hx, _hy)
+                pos   = (_hx, _hy)
+            else:
+                on_pt = False
+                pos   = (0.0, 0.0)
+
+            result = machine.update(on_point=on_pt, hand_pos=pos, timestamp=ts)
+            point_states_by_hand[(pid, hand)] = machine.state
             if result.triggered:
                 triggered_points.append(pid)
+                trigger_events.append(TriggerEvent(
+                    point_id=pid, timestamp=ts, hand_pos=pos, handedness=hand,
+                ))
             if result.state_changed:
                 state_changes.append(result)
 
+        # Collapse to dominant state per point_id for backward-compat consumers
+        _STATE_PRIORITY = {
+            PointState.ACTIVE: 6, PointState.TRIGGERED_PENDING: 5,
+            PointState.ARMED: 4,  PointState.COOLDOWN: 3,
+            PointState.WAITING_FOR_CLEAR: 2, PointState.IDLE: 1,
+        }
+        point_states = {}
+        for (pid, hand), state in point_states_by_hand.items():
+            prev = point_states.get(pid)
+            if prev is None or _STATE_PRIORITY.get(state, 0) > _STATE_PRIORITY.get(prev, 0):
+                point_states[pid] = state
+
         return FrameResult(
-            hand_detected    = hand_result.detected,
-            hand_x           = hx,
-            hand_y           = hy,
-            triggered_points = triggered_points,
-            state_changes    = state_changes,
-            point_states     = {pid: m.state for pid, m in self._machines.items()},
-            timestamp        = ts,
-            full_landmarks   = hand_result.landmarks if hand_result.detected else [],
+            hand_detected        = bool(all_hands),
+            hand_x               = hx,
+            hand_y               = hy,
+            triggered_points     = triggered_points,
+            state_changes        = state_changes,
+            point_states         = point_states,
+            timestamp            = ts,
+            trigger_events       = trigger_events,
+            point_states_by_hand = point_states_by_hand,
+            full_landmarks       = primary_landmarks,
         )
+
 
     def _process_hand_position(
         self,
@@ -653,14 +736,19 @@ class PointTriggerDetector:
         y: float,
         detected: bool,
         timestamp: float | None = None,
+        handedness: str = "Right",
     ) -> FrameResult:
         """
         ★ สำหรับ Unit Test เท่านั้น ★
         Bypass MediaPipe — inject hand position โดยตรง
         ทำให้ test state machine logic ได้โดยไม่ต้องมีกล้องหรือ MediaPipe
 
+        Parameters
+        ----------
+        handedness : "Left" | "Right"  — which per-hand machine to update
+
         เรียกใช้โดยตรงบน PointTriggerDetector object ใน test:
-            detector._process_hand_position(x=100, y=100, detected=True)
+            detector._process_hand_position(x=100, y=100, detected=True, handedness="Left")
         """
         ts = timestamp if timestamp is not None else time.monotonic()
         hx, hy = (x, y) if detected else (0.0, 0.0)
@@ -671,10 +759,16 @@ class PointTriggerDetector:
                 self._on_hand_pos(hx, hy)
 
         triggered_points: list[int]               = []
+        trigger_events:   list                    = []
         state_changes:    list[PointUpdateResult] = []
+        point_states_by_hand: dict                = {}
 
-        for pid, machine in self._machines.items():
-            on_pt = detected and machine.point.is_on_point(hx, hy)
+        # Update only the machines that match the given handedness
+        for (pid, hand), machine in self._machines.items():
+            if hand != handedness:
+                point_states_by_hand[(pid, hand)] = machine.state
+                continue
+            on_pt  = detected and machine.point.is_on_point(hx, hy)
             result = machine.update(
                 on_point  = on_pt,
                 hand_pos  = (hx, hy),
@@ -682,32 +776,72 @@ class PointTriggerDetector:
             )
             if result.triggered:
                 triggered_points.append(pid)
+                trigger_events.append(TriggerEvent(
+                    point_id   = pid,
+                    timestamp  = ts,
+                    hand_pos   = (hx, hy),
+                    handedness = handedness,
+                ))
             if result.state_changed:
-                state_changes.append(result)
+                state_changes.append(PointUpdateResult(
+                    point_id      = result.point_id,
+                    prev_state    = result.prev_state,
+                    new_state     = result.new_state,
+                    triggered     = result.triggered,
+                    state_changed = True,
+                    handedness    = handedness,
+                ))
+            point_states_by_hand[(pid, hand)] = machine.state
+
+        _STATE_PRIORITY = {
+            PointState.ACTIVE: 6, PointState.TRIGGERED_PENDING: 5,
+            PointState.ARMED: 4,  PointState.COOLDOWN: 3,
+            PointState.WAITING_FOR_CLEAR: 2, PointState.IDLE: 1,
+        }
+        point_states: dict[int, PointState] = {}
+        for (pid, hand), state in point_states_by_hand.items():
+            prev = point_states.get(pid)
+            if prev is None or _STATE_PRIORITY.get(state, 0) > _STATE_PRIORITY.get(prev, 0):
+                point_states[pid] = state
 
         return FrameResult(
-            hand_detected    = detected,
-            hand_x           = hx,
-            hand_y           = hy,
-            triggered_points = triggered_points,
-            state_changes    = state_changes,
-            point_states     = {pid: m.state for pid, m in self._machines.items()},
-            timestamp        = ts,
+            hand_detected        = detected,
+            hand_x               = hx,
+            hand_y               = hy,
+            triggered_points     = triggered_points,
+            state_changes        = state_changes,
+            point_states         = point_states,
+            timestamp            = ts,
+            trigger_events       = trigger_events,
+            point_states_by_hand = point_states_by_hand,
         )
 
     # ------------------------------------------------------------------
     # Accessors
     # ------------------------------------------------------------------
 
-    def get_state(self, point_id: int) -> PointState:
-        m = self._machines.get(point_id)
+    def get_state(self, point_id: int, handedness: str = "Right") -> PointState:
+        """Return state of the machine for (point_id, handedness)."""
+        m = self._machines.get((point_id, handedness))
         return m.state if m else PointState.IDLE
 
     def get_all_states(self) -> dict[int, PointState]:
-        return {pid: m.state for pid, m in self._machines.items()}
+        """Collapsed: dominant state per point_id (ACTIVE > TRIGGERED_PENDING > ...). """
+        _STATE_PRIORITY = {
+            PointState.ACTIVE: 6, PointState.TRIGGERED_PENDING: 5,
+            PointState.ARMED: 4,  PointState.COOLDOWN: 3,
+            PointState.WAITING_FOR_CLEAR: 2, PointState.IDLE: 1,
+        }
+        result: dict[int, PointState] = {}
+        for (pid, hand), m in self._machines.items():
+            prev = result.get(pid)
+            if prev is None or _STATE_PRIORITY.get(m.state, 0) > _STATE_PRIORITY.get(prev, 0):
+                result[pid] = m.state
+        return result
 
-    def get_machine(self, point_id: int) -> Optional[PointStateMachine]:
-        return self._machines.get(point_id)
+    def get_machine(self, point_id: int, handedness: str = "Right") -> Optional[PointStateMachine]:
+        """Return the PointStateMachine for (point_id, handedness)."""
+        return self._machines.get((point_id, handedness))
 
     def get_trajectory(self) -> list[TrajectoryPoint]:
         """ดึง trajectory ที่กำลัง record อยู่ (ไม่หยุดบันทึก)"""

@@ -81,6 +81,7 @@ class CycleLog(Base):
     # status values: in_progress | pass | fail | sequence_error | timeout
     sequence_errors  = Column(JSON, default=list)      # list of error descriptions
     zone_times       = Column(JSON, default=dict)      # {zone_id: elapsed_sec}
+    zone_hands       = Column(JSON, default=dict)      # {zone_id: "Left"|"Right"} Phase-1
     dtw_score        = Column(Float, nullable=True)    # similarity vs golden
 
     session: Session = relationship("Session", back_populates="cycles")
@@ -114,6 +115,10 @@ class ZoneEvent(Base):
     timestamp   = Column(DateTime, nullable=False)
     hand_x      = Column(Float, nullable=True)       # normalized [0,1]
     hand_y      = Column(Float, nullable=True)
+    # Phase-1 dual-hand: "Left" | "Right" | "" — recorded, not evaluated yet
+    # NOTE (Phase-2 warning): MediaPipe may swap labels when hands cross;
+    # debounce before using this field for anomaly detection.
+    hand        = Column(String(8), nullable=True, default="")
 
     cycle: CycleLog = relationship("CycleLog", back_populates="zone_events")
 

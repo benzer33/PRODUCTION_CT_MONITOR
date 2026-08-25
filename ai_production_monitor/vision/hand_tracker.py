@@ -45,7 +45,18 @@ class HandResult:
     x_norm:     float   # wrist normalised [0,1]
     y_norm:     float   # wrist normalised [0,1]
     landmarks:  list    # raw MediaPipe landmark list (all 21)
-    hand_label: str     # "Left" | "Right" | ""
+    hand_label: str     # "Left" | "Right" | ""  (backward-compat alias)
+    # Phase-1 dual-hand field: explicit handedness string.
+    # NOTE (Phase-2 warning): MediaPipe Hands does NOT maintain cross-frame
+    # identity when two hands cross/overlap.  The label may swap for 1-3 frames
+    # during occlusion.  Phase-2 false-positive filtering MUST smooth/debounce
+    # this field before using it for anomaly detection.
+    handedness: str = ""  # "Left" | "Right" | "" — set equal to hand_label on construction
+
+    def __post_init__(self):
+        # Keep handedness in sync with hand_label if not explicitly provided
+        if not self.handedness:
+            self.handedness = self.hand_label
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +105,10 @@ class HandTracker:
 
     def process(self, frame: np.ndarray) -> HandResult:
         """
-        Detect hands in *frame* and return the primary hand's wrist position.
+        Detect hands in *frame* and return the **primary** (most-active) hand.
+
+        Backward-compatible single-hand API.
+        Use process_all() for dual-hand tracking (Phase-1+).
 
         Parameters
         ----------
@@ -138,6 +152,56 @@ class HandTracker:
             landmarks  = best_lm.landmark,
             hand_label = best_label,
         )
+
+    def process_all(self, frame: np.ndarray) -> list:
+        """
+        Detect hands in *frame* and return ALL detected hands (0, 1, or 2).
+
+        Returns a list[HandResult], one per detected hand.  Each HandResult has
+        .handedness set to "Left" or "Right" from MediaPipe's classification.
+
+        NOTE (Phase-2 warning): When two hands cross or overlap, MediaPipe may
+        swap the Left/Right label for 1-3 frames due to lack of true cross-frame
+        identity tracking.  Phase-2 anomaly detection MUST apply temporal
+        smoothing/debouncing before flagging wrong-hand events to avoid false
+        alarms from this known MediaPipe limitation.
+
+        Parameters
+        ----------
+        frame : BGR uint8 frame from OpenCV
+
+        Returns
+        -------
+        list[HandResult] — empty when no hand is detected.
+        """
+        h, w = frame.shape[:2]
+        rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb.flags.writeable = False
+        results = self._hands.process(rgb)
+
+        if not results.multi_hand_landmarks:
+            return []
+
+        hands: list = []
+        for idx, lm_set in enumerate(results.multi_hand_landmarks):
+            label = (
+                results.multi_handedness[idx].classification[0].label
+                if results.multi_handedness else ""
+            )
+            wrist  = lm_set.landmark[self.WRIST_IDX]
+            px     = wrist.x * w
+            py     = wrist.y * h
+            hands.append(HandResult(
+                detected   = True,
+                x          = px,
+                y          = py,
+                x_norm     = wrist.x,
+                y_norm     = wrist.y,
+                landmarks  = lm_set.landmark,
+                hand_label = label,
+                handedness = label,
+            ))
+        return hands
 
     # ------------------------------------------------------------------
     # Drawing helper

@@ -75,7 +75,7 @@ def make_detector(
     """สร้าง detector พร้อม trigger_log สำหรับเก็บ trigger events"""
     triggered_log: list[int] = []
 
-    def on_trig(point_id, ts, pos):
+    def on_trig(point_id, ts, pos, handedness=""):
         triggered_log.append(point_id)
 
     det = PointTriggerDetector(

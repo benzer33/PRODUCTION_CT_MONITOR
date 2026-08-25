@@ -110,20 +110,22 @@ class DatabaseManager:
         standard_time_sec: float | None = None,
         deviation_pct: float | None = None,
         zone_times: dict | None = None,
+        zone_hands: dict | None = None,   # Phase-1: {zone_id: "Left"|"Right"}
         sequence_errors: list | None = None,
         dtw_score: float | None = None,
     ) -> None:
         with self._session() as s:
             cycle = s.get(CycleLog, cycle_id)
             if cycle:
-                cycle.ended_at         = datetime.datetime.utcnow()
-                cycle.cycle_time_sec   = cycle_time_sec
+                cycle.ended_at          = datetime.datetime.utcnow()
+                cycle.cycle_time_sec    = cycle_time_sec
                 cycle.standard_time_sec = standard_time_sec
-                cycle.deviation_pct    = deviation_pct
-                cycle.zone_times       = zone_times or {}
-                cycle.sequence_errors  = sequence_errors or []
-                cycle.dtw_score        = dtw_score
-                cycle.status           = status
+                cycle.deviation_pct     = deviation_pct
+                cycle.zone_times        = zone_times or {}
+                cycle.zone_hands        = zone_hands or {}
+                cycle.sequence_errors   = sequence_errors or []
+                cycle.dtw_score         = dtw_score
+                cycle.status            = status
                 s.commit()
 
     def get_session_cycles(self, session_id: int) -> list[CycleLog]:
@@ -146,6 +148,7 @@ class DatabaseManager:
         event_type: str,   # "enter" | "exit"
         hand_x: float | None = None,
         hand_y: float | None = None,
+        hand: str = "",    # Phase-1: "Left" | "Right" | ""
     ) -> int:
         with self._session() as s:
             evt = ZoneEvent(
@@ -156,6 +159,7 @@ class DatabaseManager:
                 timestamp=datetime.datetime.utcnow(),
                 hand_x=hand_x,
                 hand_y=hand_y,
+                hand=hand,
             )
             s.add(evt)
             s.commit()

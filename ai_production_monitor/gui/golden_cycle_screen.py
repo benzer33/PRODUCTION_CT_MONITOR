@@ -65,10 +65,13 @@ class CycleResultRow(QFrame):
         layout.addWidget(self._mk_label(f"{total:.2f}s", color="#00bcd4"))
 
         zone_times = record.get("zone_times", {})
+        zone_hands = record.get("zone_hands", {})
         for zid_str, t in zone_times.items():
-            zid  = int(zid_str)
-            name = zone_names.get(zid, f"Z{zid}")
-            layout.addWidget(self._mk_label(f"{name}: {t:.2f}s", color="#b0bec5"))
+            zid   = int(zid_str)
+            name  = zone_names.get(zid, f"Z{zid}")
+            hand  = zone_hands.get(zid_str, "")
+            hand_tag = f" ({hand[0]})" if hand else ""  # "(L)" or "(R)"
+            layout.addWidget(self._mk_label(f"{name}: {t:.2f}s{hand_tag}", color="#b0bec5"))
 
         layout.addStretch()
         layout.addWidget(self._mk_label(status.upper(), bold=True, color=color))
@@ -280,6 +283,7 @@ class GoldenCycleScreen(QWidget):
         self._tracker_thread.frame_ready.connect(self._video.set_frame)
         self._tracker_thread.error_occurred.connect(self._on_error)
         self._tracker_thread.point_triggered.connect(self._on_point_triggered)
+        self._tracker_thread.point_triggered_with_hand.connect(self._on_point_triggered_with_hand)
         self._tracker_thread.point_state_changed.connect(self._on_point_state_changed)
         self._tracker_thread.hand_position_updated.connect(self._on_hand_position)
         self._tracker_thread.start()
@@ -321,8 +325,9 @@ class GoldenCycleScreen(QWidget):
                 status          = r.get("status", "pass"),
             )
             for zid_str, t in r.get("zone_times", {}).items():
-                zid = int(zid_str)
-                zt  = ZoneTiming(zone_id=zid)
+                zid  = int(zid_str)
+                hand = r.get("zone_hands", {}).get(zid_str, "")
+                zt   = ZoneTiming(zone_id=zid, hand=hand)
                 zt.exit_time  = t
                 zt.enter_time = 0
                 rec.zone_timings[zid] = zt
@@ -384,8 +389,15 @@ class GoldenCycleScreen(QWidget):
 
     def _on_point_triggered(self, point_id: int, timestamp: float,
                             hand_x: float, hand_y: float) -> None:
+        """Backward-compat slot; actual work done in _on_point_triggered_with_hand."""
+        pass
+
+    def _on_point_triggered_with_hand(
+        self, point_id: int, timestamp: float,
+        hand_x: float, hand_y: float, handedness: str,
+    ) -> None:
         if self._cycle_tracker:
-            self._cycle_tracker.on_zone_event(point_id, "enter")
+            self._cycle_tracker.on_zone_event(point_id, "enter", handedness)
             self._cycle_tracker.tick(hand_x, hand_y)
 
     def _on_point_state_changed(self, point_id: int, state_name: str) -> None:
@@ -418,6 +430,7 @@ class GoldenCycleScreen(QWidget):
             "total_time":      record.total_time,
             "status":          record.status,
             "zone_times":      record.zone_times_dict(),
+            "zone_hands":      record.zone_hands_dict(),
             "sequence_errors": record.sequence_errors,
             "trajectory":      record.trajectory,
             "start_time":      record.start_time,

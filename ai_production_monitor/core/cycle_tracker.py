@@ -75,6 +75,7 @@ class ZoneTiming:
     enter_time: float = 0.0
     exit_time: float  = 0.0
     elapsed: float    = 0.0   # updated in real-time before exit too
+    hand: str         = ""    # "Left" | "Right" | "" — Phase-1: recorded, not evaluated
 
     def duration(self) -> float:
         if self.exit_time:
@@ -100,6 +101,10 @@ class CycleRecord:
 
     def zone_times_dict(self) -> dict[str, float]:
         return {str(zid): zt.duration() for zid, zt in self.zone_timings.items()}
+
+    def zone_hands_dict(self) -> dict[str, str]:
+        """Phase-1: {str(zone_id): hand_label} for each zone that was entered."""
+        return {str(zid): zt.hand for zid, zt in self.zone_timings.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +201,7 @@ class CycleTracker:
     # Public event handlers (called by vision thread per frame)
     # ------------------------------------------------------------------
 
-    def on_zone_event(self, zone_id: int, event_type: str) -> None:
+    def on_zone_event(self, zone_id: int, event_type: str, handedness: str = "") -> None:
         """
         Process a zone entry or exit event.
 
@@ -204,9 +209,10 @@ class CycleTracker:
         ----------
         zone_id    : which zone
         event_type : "enter" | "exit"
+        handedness : "Left" | "Right" | ""  (Phase-1: stored, not evaluated)
         """
         if event_type == "enter":
-            self._handle_enter(zone_id)
+            self._handle_enter(zone_id, handedness)
         elif event_type == "exit":
             self._handle_exit(zone_id)
 
@@ -243,7 +249,7 @@ class CycleTracker:
     # Internal state-machine handlers
     # ------------------------------------------------------------------
 
-    def _handle_enter(self, zone_id: int) -> None:
+    def _handle_enter(self, zone_id: int, handedness: str = "") -> None:
         expected_idx = self._current_zone_idx
         expected_zone = (
             self._zone_sequence[expected_idx]
@@ -255,7 +261,7 @@ class CycleTracker:
         if self._state == CycleState.IDLE:
             if zone_id == self._zone_sequence[0]:
                 self._start_cycle()
-                self._enter_zone(zone_id)
+                self._enter_zone(zone_id, handedness)
             else:
                 # Entered a zone other than Zone 1 — sequence error
                 self._record_sequence_error(
@@ -268,7 +274,7 @@ class CycleTracker:
         if zone_id != expected_zone:
             self._record_sequence_error(expected=expected_zone, actual=zone_id)
             # Still track the zone so timing doesn't break entirely
-        self._enter_zone(zone_id)
+        self._enter_zone(zone_id, handedness)
 
     def _handle_exit(self, zone_id: int) -> None:
         if zone_id not in self._zone_timings:
@@ -308,9 +314,9 @@ class CycleTracker:
         self._alerted_zones    = set()
         self._set_state(CycleState.ZONE_1_ACTIVE)
 
-    def _enter_zone(self, zone_id: int) -> None:
+    def _enter_zone(self, zone_id: int, handedness: str = "") -> None:
         now = time.monotonic()
-        zt = ZoneTiming(zone_id=zone_id, enter_time=now)
+        zt = ZoneTiming(zone_id=zone_id, enter_time=now, hand=handedness)
         self._zone_timings[zone_id] = zt
         self._current_zone_id = zone_id
 

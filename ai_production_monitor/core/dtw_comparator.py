@@ -360,6 +360,7 @@ class GoldenReference:
         n_cycles_recorded:    int = 0,
         representative_record=None,
         n_resample:           int = 200,
+        zone_preferred_hand:  dict | None = None,
     ) -> None:
         self.raw_trajectory      = raw_trajectory
         self.standard_times      = standard_times
@@ -368,6 +369,10 @@ class GoldenReference:
         self.n_cycles_recorded   = n_cycles_recorded
         self.representative_record = representative_record
         self._n_resample         = n_resample
+        # Phase-1: {zone_id: most_common_hand} — stored for analysis, NOT used for flagging yet
+        # NOTE (Phase-2 warning): derived from raw MediaPipe labels which may swap when hands
+        # cross.  Phase-2 logic must validate / debounce before using for anomaly detection.
+        self.zone_preferred_hand: dict[int, str] = zone_preferred_hand or {}
 
         arr = _to_array(raw_trajectory)
         self.trajectory: np.ndarray = _resample(arr, n_resample)
@@ -491,20 +496,39 @@ class GoldenCycleProcessor:
 
         raw_traj = rep_record.trajectory if rep_record.trajectory else []
 
-        # ถ้า representative cycle ไม่มี trajectory ใช้ cycle แรกที่มี
+        # If representative cycle has no trajectory, use the first cycle that does
         if not raw_traj:
             for r in cycle_records:
                 if r.trajectory:
                     raw_traj = r.trajectory
                     break
 
+        # -- Phase-1: compute most-common hand per zone -------------------------
+        # Tally handedness labels from all recorded cycles.
+        # NOTE (Phase-2 warning): raw MediaPipe labels may swap briefly when
+        # hands cross; treat this as soft pattern data only, not ground truth.
+        from collections import Counter
+        zone_hand_tally: dict[int, Counter] = {}
+        for rec in cycle_records:
+            for zid, zt in rec.zone_timings.items():
+                if zt.hand:   # skip empty strings (no hand recorded)
+                    if zid not in zone_hand_tally:
+                        zone_hand_tally[zid] = Counter()
+                    zone_hand_tally[zid][zt.hand] += 1
+        zone_preferred_hand: dict[int, str] = {
+            zid: ctr.most_common(1)[0][0]
+            for zid, ctr in zone_hand_tally.items()
+            if ctr
+        }
+
         return GoldenReference(
-            raw_trajectory      = raw_traj,
-            standard_times      = standard_times,
-            total_standard_time = median_total,
-            zone_order          = zone_order,
-            n_cycles_recorded   = len(cycle_records),
+            raw_trajectory        = raw_traj,
+            standard_times        = standard_times,
+            total_standard_time   = median_total,
+            zone_order            = zone_order,
+            n_cycles_recorded     = len(cycle_records),
             representative_record = rep_record,
+            zone_preferred_hand   = zone_preferred_hand,
         )
 
 

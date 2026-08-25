@@ -217,7 +217,7 @@ class TestFullCycleIntegration:
             trigger_points   = points,
             trigger_confirm  = trigger_frames,
             clear_confirm    = clear_frames,
-            on_trigger       = lambda pid, ts, pos: bridge.on_point_triggered(
+            on_trigger       = lambda pid, ts, pos, hand="": bridge.on_point_triggered(
                 pid, ts, pos[0], pos[1]
             ),
             on_state_change  = lambda pid, state: bridge.on_point_state_changed(
@@ -229,7 +229,7 @@ class TestFullCycleIntegration:
 
         # For each zone: clear → enter → trigger → exit
         for pid in zone_ids:
-            machine = detector.get_machine(pid)
+            machine = detector.get_machine(pid, "Right")
             assert machine is not None
 
             # clear phase
@@ -283,7 +283,7 @@ class TestFullCycleIntegration:
             trigger_points  = points,
             trigger_confirm = 3,
             clear_confirm   = 4,
-            on_trigger      = lambda pid, ts, pos: bridge.on_point_triggered(
+            on_trigger      = lambda pid, ts, pos, hand="": bridge.on_point_triggered(
                 pid, ts, pos[0], pos[1]
             ),
             on_state_change = lambda pid, state: bridge.on_point_state_changed(
@@ -296,7 +296,7 @@ class TestFullCycleIntegration:
             detector.reset_cycle()
             bridge.reset()
             for pid in [1, 2, 3]:
-                machine = detector.get_machine(pid)
+                machine = detector.get_machine(pid, "Right")
                 for _ in range(6):
                     machine.update(on_point=False, hand_pos=(200.0, 200.0))
                 for _ in range(4):

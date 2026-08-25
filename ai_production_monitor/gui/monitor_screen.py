@@ -528,6 +528,7 @@ class MonitorScreen(QWidget):
         self._tracker_thread.hand_skeleton_updated.connect(self._on_skeleton_updated)
         self._tracker_thread.error_occurred.connect(self._on_error)
         self._tracker_thread.point_triggered.connect(self._on_point_triggered)
+        self._tracker_thread.point_triggered_with_hand.connect(self._on_point_triggered_with_hand)
         self._tracker_thread.point_state_changed.connect(self._on_point_state_changed)
         self._tracker_thread.hand_position_updated.connect(self._on_hand_position)
         self._tracker_thread.start()
@@ -672,14 +673,15 @@ class MonitorScreen(QWidget):
         if self._session_id:
             cid = self._db.start_cycle(self._session_id, self._cycle_number)
             self._db.complete_cycle(
-                cycle_id        = cid,
-                status          = status,
-                cycle_time_sec  = total_time,
+                cycle_id          = cid,
+                status            = status,
+                cycle_time_sec    = total_time,
                 standard_time_sec = std_total or None,
-                deviation_pct   = dev_pct,
-                zone_times      = record.get("zone_times"),
-                sequence_errors = record.get("sequence_errors"),
-                dtw_score       = record.get("dtw_score"),
+                deviation_pct     = dev_pct,
+                zone_times        = record.get("zone_times"),
+                zone_hands        = record.get("zone_hands"),
+                sequence_errors   = record.get("sequence_errors"),
+                dtw_score         = record.get("dtw_score"),
             )
 
         # Update aggregate
@@ -702,9 +704,17 @@ class MonitorScreen(QWidget):
 
     def _on_point_triggered(self, point_id: int, timestamp: float,
                             hand_x: float, hand_y: float) -> None:
-        """Relay point trigger → CycleTracker as zone 'enter' event."""
+        """Backward-compat slot (no handedness).  Use _on_point_triggered_with_hand instead."""
+        # This slot is still connected for safety; the with-hand slot does the real work.
+        pass
+
+    def _on_point_triggered_with_hand(
+        self, point_id: int, timestamp: float,
+        hand_x: float, hand_y: float, handedness: str,
+    ) -> None:
+        """Relay point trigger → CycleTracker as zone 'enter' event, recording handedness."""
         if self._cycle_tracker:
-            self._cycle_tracker.on_zone_event(point_id, "enter")
+            self._cycle_tracker.on_zone_event(point_id, "enter", handedness)
             self._cycle_tracker.tick(hand_x, hand_y)
 
     def _on_point_state_changed(self, point_id: int, state_name: str) -> None:
@@ -749,6 +759,7 @@ class MonitorScreen(QWidget):
             "total_time":      record.total_time,
             "status":          record.status,
             "zone_times":      record.zone_times_dict(),
+            "zone_hands":      record.zone_hands_dict(),
             "sequence_errors": record.sequence_errors,
             "trajectory":      record.trajectory,
             "start_time":      record.start_time,
