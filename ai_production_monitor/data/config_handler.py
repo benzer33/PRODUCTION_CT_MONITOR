@@ -115,6 +115,7 @@ class ConfigHandler:
         width: int = 1280,
         height: int = 720,
         fps: int = 30,
+        mirror_horizontal: bool = False,
         station_id: str | None = None,
     ) -> None:
         self.get_station(station_id)["camera"] = {
@@ -124,6 +125,7 @@ class ConfigHandler:
             "width": width,
             "height": height,
             "fps": fps,
+            "mirror_horizontal": mirror_horizontal,
         }
 
     # ------------------------------------------------------------------

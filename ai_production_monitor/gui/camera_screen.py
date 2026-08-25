@@ -514,6 +514,13 @@ class CameraScreen(QWidget):
         self._chk_reconnect.setStyleSheet(f"color: #b0bec5; font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_BODY}px;")
         cap_form.addRow("", self._chk_reconnect)
 
+        # Mirror horizontal
+        self._chk_mirror = QCheckBox("Mirror ภาพแนวนอน (Flip horizontal)")
+        self._chk_mirror.setChecked(False)
+        self._chk_mirror.setStyleSheet(f"color: #b0bec5; font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_BODY}px;")
+        self._chk_mirror.stateChanged.connect(self._on_mirror_toggled)
+        cap_form.addRow("", self._chk_mirror)
+
         layout.addWidget(cap_grp)
         layout.addStretch()
 
@@ -716,11 +723,12 @@ class CameraScreen(QWidget):
 
             w, h = self._parse_resolution()
             return CameraManager(
-                source    = source,
-                width     = w,
-                height    = h,
-                fps       = self._spin_fps.value(),
-                reconnect = self._chk_reconnect.isChecked(),
+                source             = source,
+                width              = w,
+                height             = h,
+                fps                = self._spin_fps.value(),
+                reconnect          = self._chk_reconnect.isChecked(),
+                mirror_horizontal  = self._chk_mirror.isChecked(),
             )
         except Exception as exc:
             self._test_result_widget.show_result(
@@ -747,6 +755,7 @@ class CameraScreen(QWidget):
             "height":               h,
             "fps":                  self._spin_fps.value(),
             "reconnect_on_failure": self._chk_reconnect.isChecked(),
+            "mirror_horizontal":    self._chk_mirror.isChecked(),
         }
 
         if type_key == "webcam":
@@ -777,14 +786,33 @@ class CameraScreen(QWidget):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
 
+        # Warn if mirror setting changed and zones are already calibrated
+        old_cfg = self._config.get_camera_config()
+        old_mirror = old_cfg.get("mirror_horizontal", False)
+        new_mirror = cfg["mirror_horizontal"]
+        if old_mirror != new_mirror and self._config.zones_are_calibrated():
+            reply = QMessageBox.warning(
+                self,
+                "⚠️  การเปลี่ยนค่า Mirror",
+                "การเปลี่ยนค่า Mirror จะทำให้พิกัด Zone ที่ Calibrate ไว้\n"
+                "ไม่ตรงกับตำแหน่งจริงอีกต่อไป (กลับซ้าย-ขวา)\n\n"
+                "ต้องการ Calibrate Zone ใหม่ทั้งหมดหลังจากบันทึกหรือไม่?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply == QMessageBox.No:
+                # User cancelled — abort save
+                return
+
         # Also update the in-memory ConfigHandler so VisionThread picks it up
         self._config.set_camera_config(
-            camera_type  = cfg["type"],
-            device_index = cfg.get("device_index", 0),
-            url          = cfg.get("url", ""),
-            width        = cfg["width"],
-            height       = cfg["height"],
-            fps          = cfg["fps"],
+            camera_type        = cfg["type"],
+            device_index       = cfg.get("device_index", 0),
+            url                = cfg.get("url", ""),
+            width              = cfg["width"],
+            height             = cfg["height"],
+            fps                = cfg["fps"],
+            mirror_horizontal  = cfg["mirror_horizontal"],
         )
         self._config.save()
 
@@ -837,6 +865,7 @@ class CameraScreen(QWidget):
 
         self._spin_fps.setValue(cfg.get("fps", 30))
         self._chk_reconnect.setChecked(cfg.get("reconnect_on_failure", True))
+        self._chk_mirror.setChecked(cfg.get("mirror_horizontal", False))
 
     # ================================================================== #
     # Navigation
@@ -845,6 +874,12 @@ class CameraScreen(QWidget):
     def _on_back(self) -> None:
         self._stop_preview()
         self.back_requested.emit()
+
+    def _on_mirror_toggled(self) -> None:
+        """Instantly apply the mirror change to a running preview."""
+        # If live preview is active, update its CameraManager flag
+        if self._preview_manager is not None:
+            self._preview_manager.mirror_horizontal = self._chk_mirror.isChecked()
 
     def closeEvent(self, event) -> None:
         self._stop_preview()

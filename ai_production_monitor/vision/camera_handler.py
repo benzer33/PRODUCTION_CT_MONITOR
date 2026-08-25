@@ -532,6 +532,7 @@ class CameraManager:
         height: int   = 720,
         fps:    int   = 30,
         reconnect: bool = True,
+        mirror_horizontal: bool = False,
         # ---- Legacy kwargs so old CameraHandler(camera_type=...) still works ----
         camera_type:  str = "",
         device_index: int = 0,
@@ -546,11 +547,12 @@ class CameraManager:
                 url,
             )
 
-        self._source    = source
-        self.width      = width
-        self.height     = height
-        self.fps        = fps
-        self._reconnect = reconnect
+        self._source            = source
+        self.width              = width
+        self.height             = height
+        self.fps                = fps
+        self._reconnect         = reconnect
+        self.mirror_horizontal  = mirror_horizontal
 
         self._cap:          Optional[cv2.VideoCapture] = None
         self._is_open:      bool  = False
@@ -718,6 +720,8 @@ class CameraManager:
             return False, None
 
         self._fail_count = 0
+        if self.mirror_horizontal:
+            frame = cv2.flip(frame, 1)
         return True, frame
 
     # ------------------------------------------------------------------
@@ -875,9 +879,10 @@ def camera_manager_from_config(cfg: dict) -> CameraManager:
     """
     source = source_from_dict(cfg)
     return CameraManager(
-        source    = source,
-        width     = cfg.get("width",  1280),
-        height    = cfg.get("height", 720),
-        fps       = cfg.get("fps",    30),
-        reconnect = cfg.get("reconnect_on_failure", True),
+        source             = source,
+        width              = cfg.get("width",  1280),
+        height             = cfg.get("height", 720),
+        fps                = cfg.get("fps",    30),
+        reconnect          = cfg.get("reconnect_on_failure", True),
+        mirror_horizontal  = cfg.get("mirror_horizontal", False),
     )

@@ -52,6 +52,7 @@
     <Compile Include="ai_production_monitor\gui\__init__.py" />
     <Compile Include="ai_production_monitor\run.py" />
     <Compile Include="ai_production_monitor\tests\test_alert_system.py" />
+    <Compile Include="ai_production_monitor\tests\test_camera_mirror.py" />
     <Compile Include="ai_production_monitor\tests\test_cycle_comparator.py" />
     <Compile Include="ai_production_monitor\tests\test_ghost_interpolator.py" />
     <Compile Include="ai_production_monitor\tests\test_point_tracker_cycle_integration.py" />
