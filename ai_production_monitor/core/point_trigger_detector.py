@@ -495,16 +495,20 @@ class FrameResult:
     # Phase-1 dual-hand fields
     trigger_events:       list = None   # list[TriggerEvent] — triggered with handedness
     point_states_by_hand: dict = None   # dict[(point_id, handedness), PointState]
-    # Visual-only: raw MediaPipe landmark list (21 points) for skeleton overlay.
+    # Visual-only: per-hand MediaPipe landmark lists for skeleton overlay.
+    # Keyed by handedness ("Left" / "Right"); value is the list of 21
+    # NormalizedLandmark objects for that hand.
     # NOTE: core trigger logic uses ONLY hand_x/hand_y above — this field is
     # strictly for the GUI rendering layer and must never influence trigger state.
-    full_landmarks:   list = None  # list of mediapipe NormalizedLandmark objects
+    full_landmarks:   dict = None  # dict[str, list[NormalizedLandmark]]
 
     def __post_init__(self):
         if self.trigger_events is None:
             self.trigger_events = []
         if self.point_states_by_hand is None:
             self.point_states_by_hand = {}
+        if self.full_landmarks is None:
+            self.full_landmarks = {}
 
 
 class PointTriggerDetector:
@@ -716,6 +720,12 @@ class PointTriggerDetector:
             if prev is None or _STATE_PRIORITY.get(state, 0) > _STATE_PRIORITY.get(prev, 0):
                 point_states[pid] = state
 
+        # Build per-hand landmark dict (visual-only, does NOT affect trigger logic)
+        full_landmarks_dict: dict = {}
+        for hr in all_hands:
+            if hr.detected and hr.landmarks:
+                full_landmarks_dict[hr.handedness] = hr.landmarks
+
         return FrameResult(
             hand_detected        = bool(all_hands),
             hand_x               = hx,
@@ -726,7 +736,7 @@ class PointTriggerDetector:
             timestamp            = ts,
             trigger_events       = trigger_events,
             point_states_by_hand = point_states_by_hand,
-            full_landmarks       = primary_landmarks,
+            full_landmarks       = full_landmarks_dict,
         )
 
 

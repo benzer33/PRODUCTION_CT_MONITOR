@@ -191,14 +191,15 @@ class PointTrackerThread(QThread):
 
             result = self._detector.process_frame(frame)
 
-            # Emit skeleton landmarks (visual-only — no trigger logic here)
-            if result.full_landmarks:
-                h, w = frame.shape[:2]
-                self.hand_skeleton_updated.emit(
-                    landmarks_to_pixels(result.full_landmarks, w, h)
-                )
-            else:
-                self.hand_skeleton_updated.emit([])
+            # Emit skeleton landmarks for ALL detected hands (visual-only).
+            # Emits a list of 21-point pixel-coord lists, one entry per hand.
+            # Empty list when no hands are detected.
+            h, w = frame.shape[:2]
+            all_skeletons = [
+                landmarks_to_pixels(lms, w, h)
+                for lms in result.full_landmarks.values()
+            ] if result.full_landmarks else []
+            self.hand_skeleton_updated.emit(all_skeletons)
 
             # Annotate frame สำหรับแสดงผล
             annotated = self._annotate(frame, result)

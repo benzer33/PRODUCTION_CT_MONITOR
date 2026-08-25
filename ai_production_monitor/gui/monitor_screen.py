@@ -212,16 +212,21 @@ class GhostOverlayWidget(QWidget):
         self._clamped = clamped
         self.update()
 
-    def set_skeleton(self, pts: list[tuple[float, float]]) -> None:
-        """Push new widget-space skeleton landmark positions and trigger repaint."""
-        self._skeleton_pts = pts
+    def set_skeleton(self, hands: list[list[tuple[float, float]]]) -> None:
+        """Push widget-space skeleton landmarks for all detected hands and repaint.
+
+        Parameters
+        ----------
+        hands : list of 21-point lists, one per detected hand (0, 1, or 2 entries).
+        """
+        self._skeleton_pts = hands
         self.update()
 
     def set_show_skeleton(self, visible: bool) -> None:
         """Toggle skeleton layer without hiding the whole overlay widget."""
         self._show_skeleton = visible
         if not visible:
-            self._skeleton_pts = []
+            self._skeleton_pts = []   # list of per-hand lists
         self.update()
 
     def reset(self) -> None:
@@ -229,7 +234,7 @@ class GhostOverlayWidget(QWidget):
         self._trail.clear()
         self._delta_sec = None
         self._clamped = False
-        self._skeleton_pts = []
+        self._skeleton_pts = []   # list of per-hand 21-point lists
         self.update()
 
     # ------------------------------------------------------------------
@@ -237,7 +242,7 @@ class GhostOverlayWidget(QWidget):
     # ------------------------------------------------------------------
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        has_skeleton = self._show_skeleton and len(self._skeleton_pts) == 21
+        has_skeleton = self._show_skeleton and bool(self._skeleton_pts)
         has_ghost    = self._trail or self._delta_sec is not None
         if not has_skeleton and not has_ghost:
             return  # nothing to draw yet
@@ -246,25 +251,28 @@ class GhostOverlayWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
 
         # --- Hand skeleton layer (cyan, drawn first so ghost renders on top) ---
+        # _skeleton_pts is a list of per-hand 21-point lists; loop over all hands.
         if has_skeleton:
-            pts = self._skeleton_pts
             lc = QColor(*SKELETON_LINE_COLOR)
             jc = QColor(*SKELETON_JOINT_COLOR)
+            for pts in self._skeleton_pts:
+                if len(pts) != 21:
+                    continue
 
-            # Edges
-            pen = QPen(lc, SKELETON_LINE_WIDTH, Qt.SolidLine)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            for a, b in HAND_CONNECTIONS:
-                if a < len(pts) and b < len(pts):
-                    painter.drawLine(QPointF(*pts[a]), QPointF(*pts[b]))
+                # Edges
+                pen = QPen(lc, SKELETON_LINE_WIDTH, Qt.SolidLine)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                for a, b in HAND_CONNECTIONS:
+                    if a < len(pts) and b < len(pts):
+                        painter.drawLine(QPointF(*pts[a]), QPointF(*pts[b]))
 
-            # Joints
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(jc))
-            for px, py in pts:
-                painter.drawEllipse(QPointF(px, py),
-                                    SKELETON_JOINT_RADIUS, SKELETON_JOINT_RADIUS)
+                # Joints
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(jc))
+                for px, py in pts:
+                    painter.drawEllipse(QPointF(px, py),
+                                        SKELETON_JOINT_RADIUS, SKELETON_JOINT_RADIUS)
 
         # --- Ghost trail + circle + delta label ---
         if has_ghost:
@@ -587,11 +595,18 @@ class MonitorScreen(QWidget):
             # Hide the overlay widget only when both layers are off
             self._ghost_overlay.hide()
 
-    def _on_skeleton_updated(self, frame_pts: list) -> None:
-        """Receive 21 frame-pixel landmark positions and scale to widget space."""
+    def _on_skeleton_updated(self, all_hands_frame_pts: list) -> None:
+        """Receive per-hand frame-pixel landmark lists and scale to widget space.
+
+        Parameters
+        ----------
+        all_hands_frame_pts : list[list[(x, y)]]
+            One inner list of 21 (x, y) pixel tuples per detected hand.
+            Empty list when no hands are in the frame.
+        """
         if not self._chk_skeleton.isChecked():
             return
-        if not frame_pts:
+        if not all_hands_frame_pts:
             self._ghost_overlay.set_skeleton([])
             return
         fw = self._last_frame_w or self._video.width()
@@ -603,11 +618,15 @@ class MonitorScreen(QWidget):
         scaled_h = fh * scale
         off_x = (self._video.width()  - scaled_w) / 2.0
         off_y = (self._video.height() - scaled_h) / 2.0
-        widget_pts = [
-            (off_x + x * scale, off_y + y * scale)
-            for x, y in frame_pts
+        # Scale every hand's landmark list to widget space
+        widget_hands = [
+            [
+                (off_x + x * scale, off_y + y * scale)
+                for x, y in hand_pts
+            ]
+            for hand_pts in all_hands_frame_pts
         ]
-        self._ghost_overlay.set_skeleton(widget_pts)
+        self._ghost_overlay.set_skeleton(widget_hands)
 
     def _on_frame_for_ghost(self, frame) -> None:
         """Called on every new frame — resize overlay to match VideoWidget
