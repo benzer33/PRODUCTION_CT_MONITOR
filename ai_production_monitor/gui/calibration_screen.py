@@ -901,11 +901,12 @@ class CalibrationScreen(QWidget):
 
         cam_cfg = self._config.get_camera_config()
         cam = CameraHandler(
-            camera_type  = cam_cfg.get("type",         "webcam"),
-            device_index = cam_cfg.get("device_index", 0),
-            url          = cam_cfg.get("url",          ""),
-            width        = cam_cfg.get("width",        1280),
-            height       = cam_cfg.get("height",       720),
+            camera_type        = cam_cfg.get("type",               "webcam"),
+            device_index       = cam_cfg.get("device_index",       0),
+            url                = cam_cfg.get("url",                ""),
+            width              = cam_cfg.get("width",              1280),
+            height             = cam_cfg.get("height",             720),
+            mirror_horizontal  = cam_cfg.get("mirror_horizontal",  False),
         )
         ok = cam.open()
         if ok:
@@ -940,12 +941,13 @@ class CalibrationScreen(QWidget):
         else:
             cam_cfg = self._config.get_camera_config()
             self._camera = CameraHandler(
-                camera_type  = cam_cfg.get("type",         "webcam"),
-                device_index = cam_cfg.get("device_index", 0),
-                url          = cam_cfg.get("url",          ""),
-                width        = cam_cfg.get("width",        1280),
-                height       = cam_cfg.get("height",       720),
-                fps          = cam_cfg.get("fps",          30),
+                camera_type        = cam_cfg.get("type",               "webcam"),
+                device_index       = cam_cfg.get("device_index",       0),
+                url                = cam_cfg.get("url",                ""),
+                width              = cam_cfg.get("width",              1280),
+                height             = cam_cfg.get("height",             720),
+                fps                = cam_cfg.get("fps",                30),
+                mirror_horizontal  = cam_cfg.get("mirror_horizontal",  False),
             )
             if self._camera.open():
                 self._live = True

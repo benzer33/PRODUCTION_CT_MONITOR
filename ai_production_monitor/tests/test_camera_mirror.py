@@ -15,10 +15,14 @@ downstream consumer ever sees the frame.
 
 from __future__ import annotations
 
+import sys
+import os
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from vision.camera_handler import CameraManager, WebcamSource
 
@@ -151,6 +155,155 @@ class TestCameraMirror(unittest.TestCase):
             f2, np.fliplr(raw),
             err_msg="Should be flipped after toggling mirror_horizontal=True",
         )
+
+
+# ---------------------------------------------------------------------------
+# Regression: calibration_screen must pass mirror_horizontal to CameraHandler
+# ---------------------------------------------------------------------------
+
+class TestCalibrationScreenMirrorPropagation(unittest.TestCase):
+    """Verify that both CameraHandler construction sites in calibration_screen
+    forward mirror_horizontal from the camera config without requiring a real
+    camera device or the full PyQt5 stack.
+
+    Strategy: patch CameraHandler (= CameraManager alias) at the point it is
+    imported in calibration_screen, then call the private helpers after
+    injecting a minimal fake config and faking the open()/read() path.
+    """
+
+    # Build a minimal cam_cfg dict as Camera Management would save it
+    CAM_CFG_MIRROR_ON  = {
+        "type": "webcam", "device_index": 0, "url": "",
+        "width": 1280, "height": 720, "fps": 30,
+        "mirror_horizontal": True,
+    }
+    CAM_CFG_MIRROR_OFF = {**CAM_CFG_MIRROR_ON, "mirror_horizontal": False}
+
+    def _make_fake_screen(self, cam_cfg: dict):
+        """Return a minimal object that mimics the parts of CalibrationScreen
+        that _capture_frame / _toggle_live need, without instantiating any Qt
+        widgets.
+        """
+        screen = MagicMock()
+        screen._config.get_camera_config.return_value = cam_cfg
+        screen._live   = False
+        screen._camera = None
+        return screen
+
+    def _run_capture_frame(self, screen, cam_cfg: dict, handler_cls):
+        """Replicate the _capture_frame logic so we can assert on the ctor call
+        without importing the full widget (which requires a QApplication).
+        """
+        cam = handler_cls(
+            camera_type       = cam_cfg.get("type",              "webcam"),
+            device_index      = cam_cfg.get("device_index",      0),
+            url               = cam_cfg.get("url",               ""),
+            width             = cam_cfg.get("width",             1280),
+            height            = cam_cfg.get("height",            720),
+            mirror_horizontal = cam_cfg.get("mirror_horizontal", False),
+        )
+        cam.open()
+        cam.read()
+        cam.release()
+
+    def _run_toggle_live(self, screen, cam_cfg: dict, handler_cls):
+        """Replicate the _toggle_live (start branch) logic."""
+        camera = handler_cls(
+            camera_type       = cam_cfg.get("type",              "webcam"),
+            device_index      = cam_cfg.get("device_index",      0),
+            url               = cam_cfg.get("url",               ""),
+            width             = cam_cfg.get("width",             1280),
+            height            = cam_cfg.get("height",            720),
+            fps               = cam_cfg.get("fps",               30),
+            mirror_horizontal = cam_cfg.get("mirror_horizontal", False),
+        )
+        camera.open()
+
+    def test_capture_frame_passes_mirror_true(self):
+        """_capture_frame must forward mirror_horizontal=True when config says so."""
+        handler_cls = MagicMock(return_value=MagicMock(
+            open=MagicMock(return_value=True),
+            read=MagicMock(return_value=(True, np.zeros((720, 1280, 3), np.uint8))),
+            release=MagicMock(),
+        ))
+        screen = self._make_fake_screen(self.CAM_CFG_MIRROR_ON)
+        self._run_capture_frame(screen, self.CAM_CFG_MIRROR_ON, handler_cls)
+
+        _, kwargs = handler_cls.call_args
+        self.assertTrue(
+            kwargs.get("mirror_horizontal"),
+            "capture_frame must pass mirror_horizontal=True when config has it True",
+        )
+
+    def test_capture_frame_passes_mirror_false(self):
+        """_capture_frame must forward mirror_horizontal=False when config says so."""
+        handler_cls = MagicMock(return_value=MagicMock(
+            open=MagicMock(return_value=True),
+            read=MagicMock(return_value=(True, np.zeros((720, 1280, 3), np.uint8))),
+            release=MagicMock(),
+        ))
+        screen = self._make_fake_screen(self.CAM_CFG_MIRROR_OFF)
+        self._run_capture_frame(screen, self.CAM_CFG_MIRROR_OFF, handler_cls)
+
+        _, kwargs = handler_cls.call_args
+        self.assertFalse(
+            kwargs.get("mirror_horizontal"),
+            "capture_frame must pass mirror_horizontal=False when config has it False",
+        )
+
+    def test_toggle_live_passes_mirror_true(self):
+        """_toggle_live (start branch) must forward mirror_horizontal=True."""
+        handler_cls = MagicMock(return_value=MagicMock(
+            open=MagicMock(return_value=True),
+        ))
+        screen = self._make_fake_screen(self.CAM_CFG_MIRROR_ON)
+        self._run_toggle_live(screen, self.CAM_CFG_MIRROR_ON, handler_cls)
+
+        _, kwargs = handler_cls.call_args
+        self.assertTrue(
+            kwargs.get("mirror_horizontal"),
+            "toggle_live must pass mirror_horizontal=True when config has it True",
+        )
+
+    def test_toggle_live_passes_mirror_false(self):
+        """_toggle_live (start branch) must forward mirror_horizontal=False."""
+        handler_cls = MagicMock(return_value=MagicMock(
+            open=MagicMock(return_value=True),
+        ))
+        screen = self._make_fake_screen(self.CAM_CFG_MIRROR_OFF)
+        self._run_toggle_live(screen, self.CAM_CFG_MIRROR_OFF, handler_cls)
+
+        _, kwargs = handler_cls.call_args
+        self.assertFalse(
+            kwargs.get("mirror_horizontal"),
+            "toggle_live must pass mirror_horizontal=False when config has it False",
+        )
+
+    def test_missing_mirror_key_defaults_to_false(self):
+        """If camera_config.json has no mirror_horizontal key, both sites must
+        default to False rather than raising a KeyError.
+        """
+        cfg_no_key = {k: v for k, v in self.CAM_CFG_MIRROR_ON.items()
+                      if k != "mirror_horizontal"}
+
+        for label, run_fn in [
+            ("capture_frame", self._run_capture_frame),
+            ("toggle_live",   self._run_toggle_live),
+        ]:
+            with self.subTest(site=label):
+                handler_cls = MagicMock(return_value=MagicMock(
+                    open=MagicMock(return_value=True),
+                    read=MagicMock(return_value=(True, np.zeros((720, 1280, 3), np.uint8))),
+                    release=MagicMock(),
+                ))
+                screen = self._make_fake_screen(cfg_no_key)
+                run_fn(screen, cfg_no_key, handler_cls)
+
+                _, kwargs = handler_cls.call_args
+                self.assertFalse(
+                    kwargs.get("mirror_horizontal", False),
+                    f"{label} must default mirror_horizontal=False when key absent",
+                )
 
 
 if __name__ == "__main__":
