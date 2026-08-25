@@ -508,12 +508,17 @@ class MonitorScreen(QWidget):
         zone_ids  = [tp.point_id for tp in trigger_points]
 
         self._cycle_tracker = CycleTracker(
-            zone_ids          = zone_ids,
-            standard_times    = std_times,
-            on_cycle_complete = self._cb_cycle_complete,
-            on_alert          = self._cb_alert,
-            on_sequence_error = self._cb_sequence_error,
-            on_state_change   = self._cb_state_change,
+            zone_ids              = zone_ids,
+            standard_times        = std_times,
+            total_standard_time   = (
+                self._golden_ref.total_standard_time
+                if self._golden_ref is not None
+                else None
+            ),
+            on_cycle_complete     = self._cb_cycle_complete,
+            on_alert              = self._cb_alert,
+            on_sequence_error     = self._cb_sequence_error,
+            on_state_change       = self._cb_state_change,
         )
 
         # Start PointTrackerThread

@@ -38,10 +38,13 @@ Features
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Callable, Optional
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +131,7 @@ class CycleTracker:
         zone_ids: list[int] = None,
         alert_threshold: int = 30,
         standard_times: dict[int, float] | None = None,
+        total_standard_time: float | None = None,
         on_cycle_complete: Callable[[CycleRecord], None] | None = None,
         on_zone_enter: Callable[[int, float], None] | None = None,
         on_zone_exit: Callable[[int, float], None] | None = None,
@@ -138,6 +142,7 @@ class CycleTracker:
         self._zone_sequence: list[int] = zone_ids or ZONE_SEQUENCE
         self._alert_threshold          = alert_threshold        # %
         self._standard_times: dict[int, float] = standard_times or {}
+        self._total_standard_time: float | None = total_standard_time
 
         # Callbacks
         self._on_cycle_complete  = on_cycle_complete
@@ -330,7 +335,18 @@ class CycleTracker:
 
         # Check total time deviation
         total = end_time - self._cycle_start
-        std_total = sum(self._standard_times.values()) if self._standard_times else 0
+        if self._total_standard_time is not None:
+            std_total = self._total_standard_time
+        elif self._standard_times:
+            std_total = sum(self._standard_times.values())
+            log.warning(
+                "CycleTracker: total_standard_time not provided; falling back to "
+                "sum of zone standard times (%.2fs). This under-counts inter-zone "
+                "travel time and will cause inaccurate pass/fail decisions.",
+                std_total,
+            )
+        else:
+            std_total = 0
         if std_total > 0:
             dev_pct = ((total - std_total) / std_total) * 100
             if dev_pct > self._alert_threshold:
@@ -445,7 +461,10 @@ class CycleTracker:
         Estimate % completion of the current cycle based on elapsed time
         vs golden standard total.  Used to sync ghost overlay.
         """
-        std_total = sum(self._standard_times.values()) if self._standard_times else 0
+        if self._total_standard_time is not None:
+            std_total = self._total_standard_time
+        else:
+            std_total = sum(self._standard_times.values()) if self._standard_times else 0
         if std_total <= 0 or self._state == CycleState.IDLE:
             return 0.0
         return min(100.0, (self.cycle_elapsed / std_total) * 100.0)

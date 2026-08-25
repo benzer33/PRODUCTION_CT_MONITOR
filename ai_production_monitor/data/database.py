@@ -12,9 +12,13 @@ Usage
 from __future__ import annotations
 
 import datetime
+import logging
 import os
+import statistics
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session as OrmSession, sessionmaker
@@ -207,9 +211,61 @@ class DatabaseManager:
 
     def load_golden_cycle(self, station_id: str) -> GoldenCycle | None:
         with self._session() as s:
-            return s.execute(
+            row = s.execute(
                 select(GoldenCycle).where(GoldenCycle.station_id == station_id)
             ).scalar_one_or_none()
+
+        if row is None:
+            return None
+
+        # Migration guard: detect rows saved with the old bug where
+        # standard_total_sec was sum(zone_standard_times) instead of
+        # median(raw_cycle_times).  When raw_cycle_times is available and
+        # its median differs from the stored total by more than 5 %, we
+        # recalculate and log a prominent warning so the operator knows to
+        # re-record the golden standard.
+        if row.raw_cycle_times:
+            try:
+                correct_total = statistics.median(row.raw_cycle_times)
+                stored_total  = float(row.standard_total_sec or 0)
+                if stored_total > 0 and abs(correct_total - stored_total) / stored_total > 0.05:
+                    log.warning(
+                        "MIGRATION WARNING — station '%s': stored standard_total_sec "
+                        "(%.2fs) differs from the median of raw_cycle_times (%.2fs) by "
+                        "more than 5%%. This record was likely saved with the old bug "
+                        "that summed per-zone standard times instead of using the full "
+                        "cycle median. The corrected value (%.2fs) will be used for this "
+                        "session. Re-record the Golden Standard to persist the fix.",
+                        station_id, stored_total, correct_total, correct_total,
+                    )
+                    row.standard_total_sec = correct_total
+            except Exception:
+                pass
+
+        return row
+
+    def recalculate_standard_total_from_raw(self, station_id: str) -> float | None:
+        """
+        Re-derive the correct standard_total_sec from stored raw_cycle_times
+        (median of real cycle durations) and persist it to the DB row.
+
+        Returns the new value, or None if no record / no raw times exist.
+        This can be called once per affected station as a one-time migration.
+        """
+        with self._session() as s:
+            row = s.execute(
+                select(GoldenCycle).where(GoldenCycle.station_id == station_id)
+            ).scalar_one_or_none()
+            if row is None or not row.raw_cycle_times:
+                return None
+            correct_total = statistics.median(row.raw_cycle_times)
+            row.standard_total_sec = correct_total
+            s.commit()
+            log.info(
+                "Migrated standard_total_sec for station '%s' to %.2fs (median of raw cycle times).",
+                station_id, correct_total,
+            )
+            return correct_total
 
     # ------------------------------------------------------------------
     # Summary statistics helpers

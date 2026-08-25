@@ -338,16 +338,14 @@ class GoldenCycleScreen(QWidget):
                 w.deleteLater()
 
         zones = {z["id"]: z.get("name", f"Zone {z['id']}") for z in self._config.get_zones()}
-        total = 0.0
         for zid, t in sorted(self._golden_ref.standard_times.items()):
             name = zones.get(zid, f"Zone {zid}")
             lbl = QLabel(f"  {name}: {t:.2f}s")
             lbl.setFont(make_font(FONT_SIZE_BODY))
             lbl.setStyleSheet("color: #00c853;")
             self._std_layout.addWidget(lbl)
-            total += t
 
-        total_lbl = QLabel(f"  Total: {total:.2f}s")
+        total_lbl = QLabel(f"  Total: {self._golden_ref.total_standard_time:.2f}s")
         total_lbl.setFont(make_font(FONT_SIZE_LABEL, bold=True))
         total_lbl.setStyleSheet("color: #00bcd4;")
         self._std_layout.addWidget(total_lbl)
@@ -371,7 +369,7 @@ class GoldenCycleScreen(QWidget):
         self._db.save_golden_cycle(
             station_id          = self._config.active_station,
             num_source_cycles   = len(self._recorded_cycles),
-            standard_total_sec  = sum(self._golden_ref.standard_times.values()),
+            standard_total_sec  = self._golden_ref.total_standard_time,
             zone_standard_times = {str(k): v for k, v in self._golden_ref.standard_times.items()},
             trajectory_points   = self._golden_ref.raw_trajectory,
             raw_cycle_times     = [r["total_time"] for r in self._recorded_cycles],
