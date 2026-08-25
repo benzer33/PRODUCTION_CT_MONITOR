@@ -40,7 +40,36 @@ class DatabaseManager:
             echo=False,
         )
         Base.metadata.create_all(self._engine)
+        self._run_migrations()
         self._SessionFactory = sessionmaker(bind=self._engine, expire_on_commit=False)
+
+    # ------------------------------------------------------------------
+    # Schema migrations (add columns missing from older DB files)
+    # ------------------------------------------------------------------
+
+    def _run_migrations(self) -> None:
+        """Apply forward-only ALTER TABLE migrations for columns added after
+        the initial schema was deployed.  Safe to run on every startup —
+        each migration is guarded by a column-existence check."""
+        migrations = [
+            # Phase-1: dual-hand metadata column
+            ("cycle_logs", "zone_hands", "TEXT DEFAULT '{}'"),
+        ]
+        with self._engine.connect() as conn:
+            for table, column, col_def in migrations:
+                rows = conn.execute(
+                    __import__("sqlalchemy").text(
+                        f"PRAGMA table_info({table})"
+                    )
+                ).fetchall()
+                existing = {r[1] for r in rows}   # column names
+                if column not in existing:
+                    conn.execute(
+                        __import__("sqlalchemy").text(
+                            f"ALTER TABLE {table} ADD COLUMN {column} {col_def}"
+                        )
+                    )
+                    conn.commit()
 
     # ------------------------------------------------------------------
     # Context helpers

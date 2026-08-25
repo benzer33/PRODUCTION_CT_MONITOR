@@ -105,12 +105,12 @@ class GoldenCycleScreen(QWidget):
         self._recorded_cycles: list[dict] = []
         self._golden_ref: GoldenReference | None = None
 
-        # Track previous state per point to detect ACTIVE → COOLDOWN transition.
-        # See monitor_screen._on_point_state_changed for full rationale.
-        # _prev_point_states         → keyed by point_id; drives cycle exit (label-flip safe)
-        # _prev_point_states_by_hand → keyed by (point_id, hand); drives HUD display only
-        self._prev_point_states: dict[int, str] = {}
+        # ── Exit-detection state ──────────────────────────────────────────
+        # _point_was_active: sticky flag — see monitor_screen for full rationale.
+        self._point_was_active: dict[int, bool] = {}
+        # ── HUD display state (per-hand, display-only) ────────────────────
         self._prev_point_states_by_hand: dict[tuple[int, str], str] = {}
+
 
         self._min_cycles = config.get_min_golden_cycles()
         self._max_cycles = config.get_max_golden_cycles()
@@ -270,7 +270,7 @@ class GoldenCycleScreen(QWidget):
 
     def _start_recording(self) -> None:
         self._recorded_cycles = []
-        self._prev_point_states = {}   # reset prev-state tracker
+        self._point_was_active = {}   # reset exit-detection flags
         self._prev_point_states_by_hand = {}
 
         # Build trigger points from config (polygon centroid adapter)
@@ -302,7 +302,7 @@ class GoldenCycleScreen(QWidget):
             self._tracker_thread.stop()
             self._tracker_thread = None
         self._cycle_tracker = None
-        self._prev_point_states = {}   # clear stale states
+        self._point_was_active = {}   # clear stale states
         self._prev_point_states_by_hand = {}
 
         self._btn_start.setEnabled(True)
@@ -414,24 +414,11 @@ class GoldenCycleScreen(QWidget):
         is keyed by point_id only (label-flip safe), while HUD display is keyed
         by (point_id, handedness) for per-hand accuracy.
         """
-        # ── cycle-exit detection (point_id key — no handedness) ──────────
-        prev_any = self._prev_point_states.get(point_id, "")
-
+        # ── cycle-exit detection — sticky ACTIVE flag ────────────────────
         if state_name == "ACTIVE":
-            self._prev_point_states[point_id] = "ACTIVE"
-        elif state_name == "COOLDOWN":
-            other_active = any(
-                s == "ACTIVE"
-                for (p, h), s in self._prev_point_states_by_hand.items()
-                if p == point_id and h != handedness
-            )
-            if not other_active:
-                self._prev_point_states[point_id] = "COOLDOWN"
-        else:
-            if self._prev_point_states.get(point_id, "") != "ACTIVE":
-                self._prev_point_states[point_id] = state_name
-
-        if prev_any == "ACTIVE" and self._prev_point_states.get(point_id) == "COOLDOWN":
+            self._point_was_active[point_id] = True
+        elif state_name == "COOLDOWN" and self._point_was_active.get(point_id):
+            self._point_was_active[point_id] = False
             if self._cycle_tracker:
                 self._cycle_tracker.on_zone_event(point_id, "exit")
 

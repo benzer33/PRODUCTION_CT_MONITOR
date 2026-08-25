@@ -332,15 +332,17 @@ class MonitorScreen(QWidget):
         self._cycle_id:   int | None = None
         self._cycle_number = 0
 
-        # Track previous state per point to detect ACTIVE → COOLDOWN transition.
-        # Two separate dicts with different purposes:
-        #   _prev_point_states          – keyed by point_id only; used for cycle-exit
-        #                                  detection (union of both hands so that an
-        #                                  unstable handedness label mid-exit cannot
-        #                                  silently swallow the exit event).
-        #   _prev_point_states_by_hand  – keyed by (point_id, handedness); used only
-        #                                  for HUD display so the label stays per-hand.
-        self._prev_point_states: dict[int, str] = {}
+        # ── Exit-detection state ──────────────────────────────────────────
+        # _point_was_active: sticky flag set when ANY hand reaches ACTIVE at a
+        #   point; cleared only after the exit event has been fired.
+        #   Simple "once ACTIVE → wait for any COOLDOWN" logic is robust to:
+        #     • MediaPipe label flips (Right↔Left) between ACTIVE and COOLDOWN
+        #     • Intermediate TRIGGERED_PENDING / ARMED emits from the *other*
+        #       per-hand machine overwriting a plain prev-state dict
+        #   Phase-1 design: CycleTracker has a single counter so one exit per
+        #   point trigger is both correct and sufficient.
+        self._point_was_active: dict[int, bool] = {}
+        # ── HUD display state (per-hand, display-only) ────────────────────
         self._prev_point_states_by_hand: dict[tuple[int, str], str] = {}
 
         # Aggregate stats
@@ -503,7 +505,7 @@ class MonitorScreen(QWidget):
         self._cycle_times = []
         self._all_cycle_records = []
         self._cycle_number = 0
-        self._prev_point_states = {}           # reset prev-state tracker
+        self._point_was_active = {}           # reset exit-detection flags
         self._prev_point_states_by_hand = {}
 
         # Build trigger points from config (polygon centroid adapter)
@@ -547,7 +549,7 @@ class MonitorScreen(QWidget):
             self._tracker_thread.stop()
             self._tracker_thread = None
         self._cycle_tracker = None
-        self._prev_point_states = {}           # clear stale states
+        self._point_was_active = {}           # clear stale states
         self._prev_point_states_by_hand = {}
         self._ghost_overlay.reset()
 
@@ -633,8 +635,16 @@ class MonitorScreen(QWidget):
         if not self._cycle_tracker:
             return
 
+        # Only show ghost while a cycle is actively in progress.
+        # CycleState.IDLE means no cycle has started yet (or the last one
+        # just completed and was reset) — ghost must be hidden in that case.
+        from core.cycle_tracker import CycleState
+        if self._cycle_tracker.state == CycleState.IDLE:
+            self._ghost_overlay.reset()
+            return
+
         elapsed = self._cycle_tracker.cycle_elapsed
-        if elapsed is None or elapsed < 0:
+        if not elapsed or elapsed <= 0:
             return
 
         golden_total = self._golden_ref.total_standard_time
@@ -723,6 +733,9 @@ class MonitorScreen(QWidget):
         hand_x: float, hand_y: float, handedness: str,
     ) -> None:
         """Relay point trigger → CycleTracker as zone 'enter' event, recording handedness."""
+        import sys as _sys
+        print(f"[ENTER] pid={point_id} hand={handedness} tracker={self._cycle_tracker is not None}",
+              flush=True, file=_sys.stderr)
         if self._cycle_tracker:
             self._cycle_tracker.on_zone_event(point_id, "enter", handedness)
             self._cycle_tracker.tick(hand_x, hand_y)
@@ -746,34 +759,19 @@ class MonitorScreen(QWidget):
             correctly shows which hand is currently doing what (P1(L):ACTIVE).
             This is display-only and has no effect on cycle state.
         """
-        # ── (a) cycle-exit detection ──────────────────────────────────────
-        prev_any = self._prev_point_states.get(point_id, "")
-
+        # ── (a) cycle-exit detection — sticky ACTIVE flag ────────────────
+        import sys as _sys
+        print(f"[STATE] pid={point_id} state={state_name} hand={handedness} "
+              f"was_active={self._point_was_active.get(point_id, False)}",
+              flush=True, file=_sys.stderr)
         if state_name == "ACTIVE":
-            # Any hand going ACTIVE promotes the point-level state to ACTIVE.
-            self._prev_point_states[point_id] = "ACTIVE"
-        elif state_name == "COOLDOWN":
-            # Only write COOLDOWN at the point level when no other hand is
-            # still in ACTIVE at this same point.
-            other_active = any(
-                s == "ACTIVE"
-                for (pid, _hand), s in self._prev_point_states_by_hand.items()
-                if pid == point_id and _hand != handedness
-            )
-            if not other_active:
-                self._prev_point_states[point_id] = "COOLDOWN"
-        else:
-            # ARMED / TRIGGERED_PENDING / IDLE — only write if the point is
-            # not already held at ACTIVE by some hand.
-            if self._prev_point_states.get(point_id, "") != "ACTIVE":
-                self._prev_point_states[point_id] = state_name
-
-        # Fire exit event on the point-level ACTIVE → COOLDOWN edge.
-        if prev_any == "ACTIVE" and self._prev_point_states.get(point_id) == "COOLDOWN":
+            self._point_was_active[point_id] = True
+        elif state_name == "COOLDOWN" and self._point_was_active.get(point_id):
+            self._point_was_active[point_id] = False
             if self._cycle_tracker:
                 self._cycle_tracker.on_zone_event(point_id, "exit")
 
-        # ── (b) HUD display — per-hand ────────────────────────────────────
+        # ── (b) HUD display — per-hand, completely independent of (a) ────
         self._prev_point_states_by_hand[(point_id, handedness)] = state_name
 
         hand_tag = f"({handedness[0]})" if handedness else ""
