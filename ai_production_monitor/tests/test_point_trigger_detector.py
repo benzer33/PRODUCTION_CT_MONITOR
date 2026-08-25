@@ -40,9 +40,31 @@ TRIGGER_CONFIRM = 3    # ใช้ค่าน้อยๆ เพื่อให
 CLEAR_CONFIRM   = 4
 
 
-def make_point(pid: int = 1, x: float = 100.0, y: float = 100.0,
-               radius: float = 20.0) -> TriggerPoint:
-    return TriggerPoint(point_id=pid, name=f"P{pid}", x=x, y=y, radius=radius)
+def make_point(
+    pid: int = 1,
+    x: float = 100.0,
+    y: float = 100.0,
+    radius: float = 20.0,
+    x1: float = None,
+    y1: float = None,
+    x2: float = None,
+    y2: float = None,
+) -> TriggerPoint:
+    """Build a TriggerPoint for tests.
+
+    When x1/x2/y1/y2 are provided, creates a rect-based zone (preferred).
+    Otherwise derives a rect from the legacy center+radius so all existing
+    state-machine tests continue to work with the same ON/NEAR_EDGE/OUTSIDE
+    position constants.
+    """
+    if x1 is None:
+        # Derive rect from circle params to preserve test position semantics
+        x1, y1, x2, y2 = x - radius, y - radius, x + radius, y + radius
+    return TriggerPoint(
+        point_id=pid, name=f"P{pid}",
+        x1=float(x1), y1=float(y1),
+        x2=float(x2), y2=float(y2),
+    )
 
 
 def make_detector(

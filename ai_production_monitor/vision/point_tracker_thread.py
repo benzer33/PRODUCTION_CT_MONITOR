@@ -251,50 +251,72 @@ class PointTrackerThread(QThread):
                 color    = _STATE_COLORS.get(state, (100, 100, 100))
                 progress = machine.confirm_progress if machine else 0.0
 
-                # วงกลมรัศมีจุด (filled overlay เบาๆ)
-                overlay = out.copy()
-                cv2.circle(
-                    overlay,
-                    (int(pt.x), int(pt.y)),
-                    int(pt.radius),
-                    color, -1,
-                )
-                cv2.addWeighted(overlay, 0.25, out, 0.75, 0, out)
+                if pt.has_rect:
+                    # ─── Rectangle zone ───────────────────────────────────
+                    x1, y1 = int(pt.x1), int(pt.y1)
+                    x2, y2 = int(pt.x2), int(pt.y2)
 
-                # วงกลมขอบ
-                cv2.circle(
-                    out,
-                    (int(pt.x), int(pt.y)),
-                    int(pt.radius),
-                    color, 2,
-                )
+                    # Semi-transparent fill
+                    overlay = out.copy()
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+                    cv2.addWeighted(overlay, 0.20, out, 0.80, 0, out)
 
-                # Progress arc (TRIGGERED_PENDING)
-                if progress > 0:
-                    self._draw_progress_arc(
-                        out, (int(pt.x), int(pt.y)),
-                        int(pt.radius) + 6,
-                        progress, color,
-                    )
+                    # Border
+                    thickness = 3 if state in (PointState.ACTIVE, PointState.TRIGGERED_PENDING) else 2
+                    cv2.rectangle(out, (x1, y1), (x2, y2), color, thickness)
 
-                # Label (ชื่อ + state)
-                label = f"{pt.name} [{state.name}]"
-                cv2.putText(
-                    out, label,
-                    (int(pt.x) - int(pt.radius), int(pt.y) - int(pt.radius) - 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                    color, 1, cv2.LINE_AA,
-                )
+                    # Progress bar along the bottom edge of the rect
+                    if progress > 0:
+                        bar_w = int((x2 - x1) * progress)
+                        cv2.rectangle(out, (x1, y2 - 4), (x1 + bar_w, y2), color, -1)
 
-                # แสดง counter ตอน TRIGGERED_PENDING
-                if machine and state == PointState.TRIGGERED_PENDING:
-                    cnt_text = f"{machine.on_count}/{machine._trigger_frames}"
+                    # Label (name + state) above the top-left corner
+                    label = f"{pt.name} [{state.name}]"
                     cv2.putText(
-                        out, cnt_text,
-                        (int(pt.x) - 12, int(pt.y) + 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                        (0, 220, 255), 2, cv2.LINE_AA,
+                        out, label,
+                        (x1, max(y1 - 6, 12)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.50,
+                        color, 1, cv2.LINE_AA,
                     )
+
+                    # Confirm counter inside rect during TRIGGERED_PENDING
+                    if machine and state == PointState.TRIGGERED_PENDING:
+                        cnt_text = f"{machine.on_count}/{machine._trigger_frames}"
+                        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                        cv2.putText(
+                            out, cnt_text,
+                            (cx - 14, cy + 6),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65,
+                            (0, 220, 255), 2, cv2.LINE_AA,
+                        )
+                else:
+                    # ─── Legacy circle zone ───────────────────────────────
+                    overlay = out.copy()
+                    cv2.circle(overlay, (int(pt.x), int(pt.y)), int(pt.radius), color, -1)
+                    cv2.addWeighted(overlay, 0.25, out, 0.75, 0, out)
+                    cv2.circle(out, (int(pt.x), int(pt.y)), int(pt.radius), color, 2)
+
+                    if progress > 0:
+                        self._draw_progress_arc(
+                            out, (int(pt.x), int(pt.y)),
+                            int(pt.radius) + 6, progress, color,
+                        )
+
+                    label = f"{pt.name} [{state.name}]"
+                    cv2.putText(
+                        out, label,
+                        (int(pt.x) - int(pt.radius), int(pt.y) - int(pt.radius) - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA,
+                    )
+
+                    if machine and state == PointState.TRIGGERED_PENDING:
+                        cnt_text = f"{machine.on_count}/{machine._trigger_frames}"
+                        cv2.putText(
+                            out, cnt_text,
+                            (int(pt.x) - 12, int(pt.y) + 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                            (0, 220, 255), 2, cv2.LINE_AA,
+                        )
 
         # วาดตำแหน่งมือ
         if self.show_hand and result.hand_detected:

@@ -828,18 +828,32 @@ class MonitorScreen(QWidget):
 # ---------------------------------------------------------------------------
 
 def _trigger_points_from_config(config: ConfigHandler) -> list[TriggerPoint]:
-    """Convert zone polygon config → TriggerPoint list.
+    """Convert zone config → TriggerPoint list.
 
-    Each zone's centroid becomes (x, y) and half of the bounding-box
-    short-axis becomes the radius.  Works for both old polygon configs and
-    any future point-based zone that already has x/y/radius keys.
+    Zones are stored as x1,y1,x2,y2 rectangles (written by CalibrationScreen).
+    These are passed directly to TriggerPoint so the detection boundary
+    matches the drawn rectangle exactly — no centroid/radius approximation.
+
+    Legacy polygon configs (older stations) still work via the fallback path.
     """
     points: list[TriggerPoint] = []
     for zone in config.get_zones():
         zid  = zone.get("id", 0)
         name = zone.get("name", f"Point {zid}")
 
-        # New-style: zone already has x, y, radius
+        # New-style rectangle config — exact match with calibration drawing
+        if "x1" in zone and "x2" in zone:
+            points.append(TriggerPoint(
+                point_id = zid,
+                name     = name,
+                x1       = float(zone["x1"]),
+                y1       = float(zone["y1"]),
+                x2       = float(zone["x2"]),
+                y2       = float(zone["y2"]),
+            ))
+            continue
+
+        # Legacy: zone already has x, y, radius (circle-based config)
         if "x" in zone and "y" in zone:
             points.append(TriggerPoint(
                 point_id = zid,
@@ -850,23 +864,18 @@ def _trigger_points_from_config(config: ConfigHandler) -> list[TriggerPoint]:
             ))
             continue
 
-        # Old-style: derive centroid from polygon
+        # Oldest style: derive from polygon vertices
         poly = zone.get("polygon", [])
         if not poly:
             continue
         xs = [p[0] for p in poly]
         ys = [p[1] for p in poly]
-        cx = sum(xs) / len(xs)
-        cy = sum(ys) / len(ys)
-        # radius = half of min(width, height) of bounding box
-        w = max(xs) - min(xs)
-        h = max(ys) - min(ys)
-        radius = max(20.0, min(w, h) / 2.0)
         points.append(TriggerPoint(
             point_id = zid,
             name     = name,
-            x        = cx,
-            y        = cy,
-            radius   = radius,
+            x1       = float(min(xs)),
+            y1       = float(min(ys)),
+            x2       = float(max(xs)),
+            y2       = float(max(ys)),
         ))
     return points

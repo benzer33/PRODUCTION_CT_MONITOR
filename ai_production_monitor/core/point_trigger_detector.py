@@ -84,17 +84,50 @@ from typing import Callable, Optional
 class TriggerPoint:
     """
     นิยามจุด trigger หนึ่งจุด  โหลดมาจาก station_config.json
-    รูปแบบ JSON:
-      {"id": 1, "name": "Pick Part A", "x": 320, "y": 240, "radius": 30}
+
+    รองรับ 2 รูปแบบ:
+    - Rectangle (preferred): x1, y1, x2, y2  ← ตรงกับที่วาดใน Calibration
+    - Legacy circle         : x, y, radius    ← backward-compat กับ config เก่า
+
+    is_on_point() ใช้ point-in-rectangle เมื่อ x1 ไม่ใช่ None
+    ไม่เช่นนั้น fallback เป็น Euclidean distance <= radius
     """
     point_id: int
     name:     str
-    x:        float   # pixel x ในพิกัด frame
-    y:        float   # pixel y ในพิกัด frame
-    radius:   float   # รัศมีตรวจจับ (pixel)
+    # --- Rectangle bounds (preferred) ---
+    x1: float = None   # left edge (pixel)
+    y1: float = None   # top edge  (pixel)
+    x2: float = None   # right edge (pixel)
+    y2: float = None   # bottom edge (pixel)
+    # --- Legacy circle (kept for backward-compat) ---
+    x:      float = 0.0
+    y:      float = 0.0
+    radius: float = 30.0
+
+    def __post_init__(self):
+        # When rect bounds are given, derive centroid for any code that still reads .x/.y
+        if self.x1 is not None and self.x2 is not None:
+            self.x = (self.x1 + self.x2) / 2.0
+            self.y = (self.y1 + self.y2) / 2.0
+            self.radius = min(self.x2 - self.x1, self.y2 - self.y1) / 2.0
+
+    @property
+    def has_rect(self) -> bool:
+        return self.x1 is not None
 
     @classmethod
     def from_dict(cls, d: dict) -> "TriggerPoint":
+        # New-style rectangle config (x1,y1,x2,y2)
+        if "x1" in d and "x2" in d:
+            return cls(
+                point_id = d["id"],
+                name     = d.get("name", f"Point {d['id']}"),
+                x1       = float(d["x1"]),
+                y1       = float(d["y1"]),
+                x2       = float(d["x2"]),
+                y2       = float(d["y2"]),
+            )
+        # Legacy circle config (x, y, radius)
         return cls(
             point_id = d["id"],
             name     = d.get("name", f"Point {d['id']}"),
@@ -104,20 +137,33 @@ class TriggerPoint:
         )
 
     def to_dict(self) -> dict:
+        if self.has_rect:
+            return {
+                "id": self.point_id, "name": self.name,
+                "x1": self.x1, "y1": self.y1,
+                "x2": self.x2, "y2": self.y2,
+            }
         return {
-            "id":     self.point_id,
-            "name":   self.name,
-            "x":      self.x,
-            "y":      self.y,
-            "radius": self.radius,
+            "id": self.point_id, "name": self.name,
+            "x": self.x, "y": self.y, "radius": self.radius,
         }
 
     def distance_to(self, px: float, py: float) -> float:
-        """คำนวณระยะ Euclidean จากจุด (px, py) มายังจุด trigger นี้"""
+        """Euclidean distance from (px, py) to the centroid of this point."""
         return math.hypot(px - self.x, py - self.y)
 
     def is_on_point(self, px: float, py: float) -> bool:
-        """True ถ้า (px, py) อยู่ภายในรัศมีของจุดนี้"""
+        """True if (px, py) is inside this trigger zone.
+
+        Uses point-in-rectangle when x1/y1/x2/y2 are set (preferred),
+        otherwise falls back to Euclidean distance <= radius.
+
+        NOTE: Only this method changed vs. the original circle logic.
+        All state-machine transitions (WAITING_FOR_CLEAR → ARMED →
+        TRIGGERED_PENDING → ACTIVE → COOLDOWN) remain completely unchanged.
+        """
+        if self.has_rect:
+            return self.x1 <= px <= self.x2 and self.y1 <= py <= self.y2
         return self.distance_to(px, py) <= self.radius
 
 
