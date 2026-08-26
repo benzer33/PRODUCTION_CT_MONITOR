@@ -705,8 +705,15 @@ class MonitorScreen(QWidget):
 
         # Persist to DB
         gc = self._config.get_golden_cycle()
-        std_times_raw = gc.get("standard_times", {})
-        std_total = sum(float(v) for v in std_times_raw.values()) if std_times_raw else 0.0
+        # ใช้ total_standard_time จาก _golden_ref ก่อน (รวม travel time ถูกต้อง)
+        # fallback: total_standard_time ที่เก็บใน config, แล้วค่อย sum zone times
+        if self._golden_ref is not None and self._golden_ref.total_standard_time:
+            std_total = self._golden_ref.total_standard_time
+        else:
+            std_total = float(gc.get("total_standard_time", 0) or 0)
+            if std_total <= 0:
+                std_times_raw = gc.get("standard_times", {})
+                std_total = sum(float(v) for v in std_times_raw.values()) if std_times_raw else 0.0
         dev_pct = ((total_time - std_total) / std_total * 100) if std_total > 0 else None
 
         if self._session_id:

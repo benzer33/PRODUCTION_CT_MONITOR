@@ -1,12 +1,12 @@
 {
-  "station_id": "PACKING_CD",
+  "station_id": "station_01",
   "frame_width": 1280,
   "frame_height": 720,
   "zones": [
     {
       "id": 1,
       "name": "CD",
-      "color": "#1565C0",
+      "color": "#1565c0",
       "x1": 1,
       "y1": 305,
       "x2": 384,
@@ -15,7 +15,7 @@
     {
       "id": 2,
       "name": "SLEEVE",
-      "color": "#00838F",
+      "color": "#00838f",
       "x1": 415,
       "y1": 302,
       "x2": 854,
@@ -24,7 +24,7 @@
     {
       "id": 3,
       "name": "FG",
-      "color": "#558B2F",
+      "color": "#558b2f",
       "x1": 879,
       "y1": 301,
       "x2": 1277,

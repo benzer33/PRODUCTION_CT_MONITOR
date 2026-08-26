@@ -186,12 +186,14 @@ class ConfigHandler:
         standard_times: dict,
         trajectory_points: list,
         recorded_cycles: list,
+        total_standard_time: float | None = None,
         station_id: str | None = None,
     ) -> None:
         self.get_station(station_id)["golden_cycle"] = {
-            "recorded_cycles": recorded_cycles,
-            "standard_times":  standard_times,
-            "trajectory_points": trajectory_points,
+            "recorded_cycles":    recorded_cycles,
+            "standard_times":     standard_times,
+            "total_standard_time": total_standard_time,
+            "trajectory_points":  trajectory_points,
         }
 
     def has_golden_cycle(self, station_id: str | None = None) -> bool:

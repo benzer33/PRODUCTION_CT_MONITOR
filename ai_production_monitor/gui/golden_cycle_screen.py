@@ -370,9 +370,10 @@ class GoldenCycleScreen(QWidget):
         # Save to config JSON
         zone_std_str = {str(k): v for k, v in self._golden_ref.standard_times.items()}
         self._config.set_golden_cycle(
-            standard_times    = zone_std_str,
-            trajectory_points = self._golden_ref.raw_trajectory,
-            recorded_cycles   = self._recorded_cycles,
+            standard_times       = zone_std_str,
+            total_standard_time  = self._golden_ref.total_standard_time,
+            trajectory_points    = self._golden_ref.raw_trajectory,
+            recorded_cycles      = self._recorded_cycles,
         )
         self._config.save()
 

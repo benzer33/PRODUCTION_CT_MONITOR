@@ -5,7 +5,7 @@
   "fps": 30,
   "reconnect_on_failure": true,
   "mirror_horizontal": true,
-  "device_index": 1,
+  "device_index": 0,
   "url": "",
   "username": "",
   "password": ""

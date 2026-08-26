@@ -19,7 +19,10 @@ from PyQt5.QtGui import QFont
 # ---------------------------------------------------------------------------
 # Font family
 # ---------------------------------------------------------------------------
-FONT_FAMILY = "Consolas"
+# Tahoma รองรับภาษาไทยบน Windows และยังดูสะอาดบน UI dark theme
+# FONT_FAMILY_MONO ใช้สำหรับตัวเลข/code ที่ต้องการ monospace (จอ monitor)
+FONT_FAMILY      = "Tahoma"
+FONT_FAMILY_MONO = "Consolas"
 
 # ---------------------------------------------------------------------------
 # Semantic size scale  (pt)
@@ -51,6 +54,9 @@ FONT_SIZE_AI_TEXT = 22
 
 # Icon-emoji in alert/status widgets
 FONT_SIZE_ICON    = 12
+
+# Raw-data table rows (summary screen)
+FONT_SIZE_TABLE   = 10
 
 # ---------------------------------------------------------------------------
 # Colour palette (keep in one place for easy tweaking)
