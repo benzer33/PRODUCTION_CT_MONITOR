@@ -17,6 +17,8 @@ from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QImage, QPainter, QPixmap, QColor, QFont
 from PyQt5.QtWidgets import QWidget, QSizePolicy
 
+from gui import theme
+
 
 class VideoWidget(QWidget):
     """
@@ -85,7 +87,7 @@ class VideoWidget(QWidget):
     def _draw_no_signal(self, painter: QPainter) -> None:
         painter.fillRect(self.rect(), QColor(10, 10, 10))
         painter.setPen(QColor(60, 60, 60))
-        painter.setFont(QFont("Consolas", 14))
+        painter.setFont(theme.make_font(theme.FONT_SIZE_BODY))
         painter.drawText(
             self.rect(),
             Qt.AlignCenter,

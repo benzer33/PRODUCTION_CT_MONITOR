@@ -336,3 +336,141 @@ def build_summary_prompt(session_data: dict) -> str:
         "โปรดวิเคราะห์และให้คำแนะนำตามโครงสร้างที่กำหนด",
     ]
     return "\n".join(output_lines)
+
+
+# ---------------------------------------------------------------------------
+# build_summary_prompt_from_settings  (settings-driven version)
+# ---------------------------------------------------------------------------
+
+def build_summary_prompt_from_settings(session_data: dict, settings: dict) -> str:
+    """
+    สร้าง prompt จาก template ที่ user กำหนดใน AI Settings
+    แทรก variables ทั้งหมดลงใน template แล้วส่งคืน prompt string
+
+    Parameters
+    ----------
+    session_data : output of DatabaseManager.get_session_full_data()
+    settings     : output of ConfigHandler.get_ai_settings()
+    """
+    stats   = session_data.get("stats", {})
+    a_summ  = session_data.get("alert_summary", {})
+    v_summ  = session_data.get("violation_summary", {})
+    session = session_data.get("session")
+    cycles  = session_data.get("cycles", [])
+
+    station_id    = getattr(session, "station_id", "N/A") if session else "N/A"
+    operator_name = getattr(session, "operator_name", None) if session else None
+    operator_str  = ("ผู้ปฏิบัติงาน: " + operator_name) if operator_name else "ผู้ปฏิบัติงาน: ไม่ระบุ"
+
+    total    = stats.get("total_cycles", 0)
+    passed   = stats.get("pass_cycles", 0)
+    failed   = stats.get("fail_cycles", 0)
+    seq_err  = stats.get("seq_error_cycles", 0)
+    avg_t    = stats.get("avg_cycle_time", 0.0)
+    min_t    = stats.get("min_cycle_time", 0.0)
+    max_t    = stats.get("max_cycle_time", 0.0)
+    std_dev  = stats.get("stdev_cycle_time", 0.0)
+    avg_dev  = stats.get("avg_deviation_pct", 0.0)
+    zone_avgs = stats.get("zone_avg_times", {})
+
+    pass_rate_str = f"{passed / max(total, 1) * 100:.0f}%"
+
+    # Zone table
+    zone_rows = []
+    for zid_str, avg in zone_avgs.items():
+        zone_rows.append(f"  โซน {zid_str}: เฉลี่ย {_fmt_sec(avg)}")
+    zone_table = "\n".join(zone_rows) if zone_rows else "  (ไม่มีข้อมูล zone)"
+
+    # Alert section
+    total_alerts   = a_summ.get("total", 0)
+    warn_count     = a_summ.get("warnings", 0)
+    crit_count     = a_summ.get("criticals", 0)
+    by_zone_alerts = a_summ.get("by_zone", {})
+    alert_by_zone  = "\n".join(
+        f"    โซน {z}: {cnt} ครั้ง" for z, cnt in by_zone_alerts.items()
+    ) if by_zone_alerts else "    ไม่มี"
+
+    # Violation section
+    total_viols = v_summ.get("total", 0)
+    skip_cnt    = v_summ.get("skip_count", 0)
+    oor_cnt     = v_summ.get("out_of_order_count", 0)
+    rep_cnt     = v_summ.get("repeat_count", 0)
+    aff_cycles  = v_summ.get("affected_cycles", 0)
+
+    # Cycle detail table
+    max_cycles = int(settings.get("max_cycles_in_prompt", 30))
+    completed  = [c for c in cycles if c.status != "in_progress"]
+    cycle_rows = []
+    if settings.get("ctx_cycle_detail", True):
+        for i, c in enumerate(completed[:max_cycles], 1):
+            t     = c.cycle_time_sec or 0.0
+            mark  = "V" if c.status == "pass" else "X"
+            dev_s = _fmt_pct(c.deviation_pct) if c.deviation_pct is not None else "N/A"
+            cycle_rows.append(f"  รอบ {i:2d}: {_fmt_sec(t)}  dev={dev_s}  {mark}  {c.status}")
+        if len(completed) > max_cycles:
+            cycle_rows.append(f"  ... (และอีก {len(completed) - max_cycles} รอบ)")
+    cycle_table = "\n".join(cycle_rows) if cycle_rows else "  (ไม่รวมข้อมูลรายรอบ)"
+
+    # Output format instructions
+    lang = settings.get("output_language", "ภาษาไทย")
+
+    length = settings.get("output_length", "medium")
+    length_map = {
+        "short":  "- ความยาวคำตอบรวม: ไม่เกิน 200 คำ (สั้น กระชับ)",
+        "medium": "- ความยาวคำตอบรวม: ไม่เกิน 400 คำ (ปานกลาง)",
+        "long":   "- ความยาวคำตอบรวม: ไม่เกิน 800 คำ (ละเอียด)",
+    }
+    length_instr = length_map.get(length, length_map["medium"])
+
+    fmt_parts = []
+    if settings.get("output_headers", True):
+        fmt_parts.append("- ใช้หัวข้อ ## สำหรับแต่ละหัวข้อหลัก")
+    if settings.get("output_bullets", True):
+        fmt_parts.append("- ใช้ bullet point สำหรับรายการย่อย")
+    format_instr = "\n".join(fmt_parts) if fmt_parts else "- ตอบเป็นย่อหน้าปกติ"
+
+    # Optionally exclude sections based on context toggles
+    if not settings.get("ctx_stats", True):
+        zone_table = "(ไม่รวมสถิติ)"
+    if not settings.get("ctx_alerts", True):
+        total_alerts = warn_count = crit_count = 0
+        alert_by_zone = "  (ไม่รวมข้อมูล alert)"
+    if not settings.get("ctx_violations", True):
+        total_viols = skip_cnt = oor_cnt = rep_cnt = aff_cycles = 0
+
+    # Build variable map
+    variables = {
+        "station_id":              station_id,
+        "operator":                operator_str,
+        "total_cycles":            str(total),
+        "passed":                  str(passed),
+        "failed":                  str(failed),
+        "seq_errors":              str(seq_err),
+        "pass_rate":               pass_rate_str,
+        "avg_time":                _fmt_sec(avg_t),
+        "min_time":                _fmt_sec(min_t),
+        "max_time":                _fmt_sec(max_t),
+        "std_dev":                 _fmt_sec(std_dev),
+        "avg_deviation":           _fmt_pct(avg_dev),
+        "zone_table":              zone_table,
+        "alert_total":             str(total_alerts),
+        "alert_warn":              str(warn_count),
+        "alert_crit":              str(crit_count),
+        "alert_by_zone":           alert_by_zone,
+        "viol_total":              str(total_viols),
+        "viol_skip":               str(skip_cnt),
+        "viol_oor":                str(oor_cnt),
+        "viol_repeat":             str(rep_cnt),
+        "viol_cycles":             str(aff_cycles),
+        "cycle_table":             cycle_table,
+        "output_language":         lang,
+        "output_length_instruction": length_instr,
+        "output_format_instruction": format_instr,
+    }
+
+    template = settings.get("prompt_template", "")
+    try:
+        return template.format_map(variables)
+    except (KeyError, ValueError):
+        # If template has unknown variables, fall back to safe format
+        return template

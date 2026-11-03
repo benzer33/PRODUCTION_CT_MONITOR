@@ -259,14 +259,17 @@ class _SummaryAnalysisWorker(QThread):
             )
             return
 
+        # Load AI settings from config (includes model, timeout, prompt template, output format)
+        ai_settings = self._config.get_ai_settings()
+
         worker = AnalysisWorker(
             api_key      = api_key,
-            model        = "gemini-3.5-flash",
+            model        = ai_settings.get("model", "gemini-2.0-flash"),
             session_data = self._session_data,
+            ai_settings  = ai_settings,
         )
         worker.analysis_ready.connect(self.analysis_ready)
         worker.analysis_error.connect(self.analysis_error)
-        # Run synchronously inside this thread (AnalysisWorker.run() is just a method)
         worker.run()
 
 
@@ -401,10 +404,11 @@ class SummaryScreen(QWidget):
         self._ai_text.setReadOnly(True)
         self._ai_text.setWordWrapMode(1)   # WrapAtWordBoundaryOrAnywhere
         self._ai_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._ai_text.setFont(make_font(FONT_SIZE_AI_TEXT))
         self._ai_text.setStyleSheet(
             f"background:{_CLR_CARD}; color:{_CLR_TEXT}; "
             "border:1px solid #152840; border-radius:4px; "
-            f"font-family:{FONT_FAMILY}; font-size:{FONT_SIZE_AI_TEXT}px; line-height:1.6;"
+            "line-height:1.6;"
         )
         self._ai_text.setPlaceholderText("AI กำลังวิเคราะห์...")
         ai_lay.addWidget(self._ai_text)

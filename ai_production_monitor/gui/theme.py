@@ -19,9 +19,10 @@ from PyQt5.QtGui import QFont
 # ---------------------------------------------------------------------------
 # Font family
 # ---------------------------------------------------------------------------
-# Tahoma รองรับภาษาไทยบน Windows และยังดูสะอาดบน UI dark theme
+# Leelawadee UI รองรับภาษาไทยได้สมดุลบน Windows 10/11 (built-in)
+# fallback: Tahoma ถ้า Leelawadee UI ไม่มีในระบบ
 # FONT_FAMILY_MONO ใช้สำหรับตัวเลข/code ที่ต้องการ monospace (จอ monitor)
-FONT_FAMILY      = "Tahoma"
+FONT_FAMILY      = "Leelawadee UI"
 FONT_FAMILY_MONO = "Consolas"
 
 # ---------------------------------------------------------------------------
@@ -85,6 +86,44 @@ def make_font(size: int, bold: bool = False) -> QFont:
 
 # Short alias used in tight code
 F = make_font
+
+
+# ---------------------------------------------------------------------------
+# Runtime font override  (called once at startup with saved user preferences)
+# ---------------------------------------------------------------------------
+
+def apply_font_settings(settings: dict) -> None:
+    """
+    Mutate the module-level font constants from a persisted settings dict.
+
+    Expected keys (all optional):
+        font_family    : str   e.g. "Leelawadee UI"
+        font_size_body : int
+        font_size_table: int
+        font_size_ai   : int
+        font_size_title: int
+        font_size_section: int
+    """
+    global FONT_FAMILY, FONT_SIZE_BODY, FONT_SIZE_TABLE, FONT_SIZE_AI_TEXT
+    global FONT_SIZE_TITLE, FONT_SIZE_SECTION, FONT_SIZE_LABEL, FONT_SIZE_CAPTION
+    global FONT_SIZE_STATUS, FONT_SIZE_METRIC
+
+    if "font_family" in settings:
+        FONT_FAMILY = settings["font_family"]
+    if "font_size_body" in settings:
+        FONT_SIZE_BODY = int(settings["font_size_body"])
+    if "font_size_table" in settings:
+        FONT_SIZE_TABLE = int(settings["font_size_table"])
+    if "font_size_ai" in settings:
+        FONT_SIZE_AI_TEXT = int(settings["font_size_ai"])
+    if "font_size_title" in settings:
+        FONT_SIZE_TITLE = int(settings["font_size_title"])
+    if "font_size_section" in settings:
+        FONT_SIZE_SECTION = int(settings["font_size_section"])
+    if "font_size_label" in settings:
+        FONT_SIZE_LABEL = int(settings["font_size_label"])
+    if "font_size_caption" in settings:
+        FONT_SIZE_CAPTION = int(settings["font_size_caption"])
 
 
 # ---------------------------------------------------------------------------

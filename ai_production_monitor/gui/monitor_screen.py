@@ -48,6 +48,7 @@ from core.dtw_comparator import GoldenReference
 from core.point_trigger_detector import TriggerPoint
 from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
+from gui import theme
 from gui.theme import (
     FONT_FAMILY, FONT_SIZE_BODY, FONT_SIZE_CAPTION, FONT_SIZE_LABEL,
     FONT_SIZE_METRIC, FONT_SIZE_SECTION, FONT_SIZE_STATUS, FONT_SIZE_TITLE,
@@ -302,7 +303,7 @@ class GhostOverlayWidget(QWidget):
                 # Red when behind (positive delta = slow), green when ahead
                 text_color = QColor("#ff1744") if self._delta_sec > 0 else QColor("#00e676")
                 painter.setPen(text_color)
-                font = QFont("Consolas", 9, QFont.Bold)
+                font = theme.make_font(theme.FONT_SIZE_CAPTION, bold=True)
                 painter.setFont(font)
                 # Position label just to the right and slightly above the circle
                 painter.drawText(

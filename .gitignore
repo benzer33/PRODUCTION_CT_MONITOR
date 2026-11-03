@@ -371,3 +371,8 @@ env/
 .env.local
 .env.production
 .env.staging
+
+# PyInstaller build output
+dist/
+build/
+*.spec.bak

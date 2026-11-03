@@ -38,8 +38,10 @@
     <Compile Include="ai_production_monitor\data\database.py" />
     <Compile Include="ai_production_monitor\data\models.py" />
     <Compile Include="ai_production_monitor\data\__init__.py" />
+    <Compile Include="ai_production_monitor\gui\ai_settings_screen.py" />
     <Compile Include="ai_production_monitor\gui\calibration_screen.py" />
     <Compile Include="ai_production_monitor\gui\camera_screen.py" />
+    <Compile Include="ai_production_monitor\gui\font_settings_screen.py" />
     <Compile Include="ai_production_monitor\gui\golden_cycle_screen.py" />
     <Compile Include="ai_production_monitor\gui\main_window.py" />
     <Compile Include="ai_production_monitor\gui\monitor_screen.py" />
@@ -61,6 +63,7 @@
     <Compile Include="ai_production_monitor\tests\test_standard_total_time.py" />
     <Compile Include="ai_production_monitor\test_calibration.py" />
     <Compile Include="ai_production_monitor\test_camera_screen.py" />
+    <Compile Include="ai_production_monitor\utils\font_downloader.py" />
     <Compile Include="ai_production_monitor\vision\camera_handler.py" />
     <Compile Include="ai_production_monitor\vision\hand_tracker.py" />
     <Compile Include="ai_production_monitor\vision\point_tracker_thread.py" />
@@ -81,6 +84,7 @@
     <Folder Include="ai_production_monitor\gui\widgets\" />
     <Folder Include="ai_production_monitor\logs\" />
     <Folder Include="ai_production_monitor\tests\" />
+    <Folder Include="ai_production_monitor\utils\" />
     <Folder Include="ai_production_monitor\vision\" />
   </ItemGroup>
   <ItemGroup>
@@ -89,6 +93,8 @@
     <Content Include="ai_production_monitor\config\default_config.json" />
     <Content Include="ai_production_monitor\logs\.gitkeep" />
     <Content Include="ai_production_monitor\requirements.txt" />
+    <Content Include="build_exe.spec" />
+    <Content Include="BUILD_INSTRUCTIONS.md" />
     <Content Include="START_APP.bat" />
     <Content Include="_fixtabs.ps1" />
     <Content Include="_newbody.txt" />

@@ -22,6 +22,9 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from gui import theme
+from gui.theme import make_font, FONT_SIZE_LABEL, FONT_SIZE_CAPTION, FONT_SIZE_METRIC
+
 
 # ---------------------------------------------------------------------------
 # Single zone card
@@ -53,10 +56,10 @@ class ZoneCard(QFrame):
         # Header row
         header = QHBoxLayout()
         self._lbl_name   = QLabel(f"Z{zone_id}  {zone_name}")
-        self._lbl_name.setFont(QFont("Consolas", 9, QFont.Bold))
+        self._lbl_name.setFont(make_font(FONT_SIZE_LABEL, bold=True))
         self._lbl_name.setStyleSheet("color: #b0bec5;")
         self._lbl_active = QLabel("●")
-        self._lbl_active.setFont(QFont("Consolas", 10))
+        self._lbl_active.setFont(make_font(FONT_SIZE_LABEL))
         self._lbl_active.setStyleSheet("color: #37474f;")
         header.addWidget(self._lbl_name)
         header.addStretch()
@@ -66,16 +69,16 @@ class ZoneCard(QFrame):
         # Time row
         time_row = QHBoxLayout()
         self._lbl_elapsed  = QLabel("0.0s")
-        self._lbl_elapsed.setFont(QFont("Consolas", 18, QFont.Bold))
+        self._lbl_elapsed.setFont(make_font(FONT_SIZE_METRIC + 6, bold=True))
         self._lbl_elapsed.setStyleSheet("color: #eceff1;")
         self._lbl_standard = QLabel("/ 0.0s")
-        self._lbl_standard.setFont(QFont("Consolas", 10))
+        self._lbl_standard.setFont(make_font(FONT_SIZE_CAPTION))
         self._lbl_standard.setStyleSheet("color: #607d8b;")
         time_row.addWidget(self._lbl_elapsed)
         time_row.addWidget(self._lbl_standard, alignment=Qt.AlignBottom)
         time_row.addStretch()
         self._lbl_dev = QLabel("")
-        self._lbl_dev.setFont(QFont("Consolas", 11, QFont.Bold))
+        self._lbl_dev.setFont(make_font(FONT_SIZE_LABEL + 1, bold=True))
         time_row.addWidget(self._lbl_dev, alignment=Qt.AlignBottom)
         layout.addLayout(time_row)
 

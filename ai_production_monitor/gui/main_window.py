@@ -41,32 +41,41 @@ from data.config_handler import ConfigHandler
 from data.database import DatabaseManager
 from gui.calibration_screen import CalibrationScreen
 from gui.camera_screen import CameraScreen
+from gui.ai_settings_screen import AISettingsScreen
+from gui.font_settings_screen import FontSettingsScreen
 from gui.golden_cycle_screen import GoldenCycleScreen
 from gui.monitor_screen import MonitorScreen
 from gui.summary_screen import SummaryScreen
+from gui import theme as _theme
 
-_DARK = """
-QMainWindow, QWidget {
+
+def _build_stylesheet() -> str:
+    """Build the global dark stylesheet from current theme constants."""
+    return f"""
+QMainWindow, QWidget {{
     background: #0d1b2a;
     color: #cfd8dc;
-    font-family: Consolas, Monospace;
-}
-QMenuBar {
+    font-family: "{_theme.FONT_FAMILY}", Tahoma, sans-serif;
+    font-size: {_theme.FONT_SIZE_BODY}pt;
+}}
+QMenuBar {{
     background: #0a1520;
     color: #cfd8dc;
-}
-QMenuBar::item:selected { background: #1565c0; }
-QMenu { background: #0f2233; color: #cfd8dc; border: 1px solid #1e3040; }
-QMenu::item:selected { background: #1565c0; }
-QStatusBar { background: #0a1520; color: #607d8b; }
+}}
+QMenuBar::item:selected {{ background: #1565c0; }}
+QMenu {{ background: #0f2233; color: #cfd8dc; border: 1px solid #1e3040; }}
+QMenu::item:selected {{ background: #1565c0; }}
+QStatusBar {{ background: #0a1520; color: #607d8b; }}
 """
 
 # Screen index constants
-IDX_CAMERA      = 0
-IDX_CALIBRATION = 1
-IDX_GOLDEN      = 2
-IDX_MONITOR     = 3
-IDX_SUMMARY     = 4
+IDX_CAMERA        = 0
+IDX_CALIBRATION   = 1
+IDX_GOLDEN        = 2
+IDX_MONITOR       = 3
+IDX_SUMMARY       = 4
+IDX_FONT_SETTINGS = 5
+IDX_AI_SETTINGS   = 6
 
 
 class MainWindow(QMainWindow):
@@ -81,7 +90,7 @@ class MainWindow(QMainWindow):
         self._db     = db
         self.setWindowTitle("AI Production Cycle Monitor")
         self.setMinimumSize(1280, 780)
-        self.setStyleSheet(_DARK)
+        self.setStyleSheet(_build_stylesheet())
 
         self._stack = QStackedWidget()
         self.setCentralWidget(self._stack)
@@ -127,6 +136,23 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._summary_screen)
         self._summary_screen.back_to_monitor.connect(self._on_back_to_monitor)
 
+        # 5 — Font Settings
+        self._font_settings_screen = FontSettingsScreen(self._config)
+        self._stack.addWidget(self._font_settings_screen)
+        self._font_settings_screen.back_requested.connect(
+            lambda: self._go(IDX_CAMERA)
+        )
+        self._font_settings_screen.settings_saved.connect(
+            self._on_font_settings_saved
+        )
+
+        # 6 — AI Settings
+        self._ai_settings_screen = AISettingsScreen(self._config)
+        self._stack.addWidget(self._ai_settings_screen)
+        self._ai_settings_screen.back_requested.connect(
+            lambda: self._go(IDX_CAMERA)
+        )
+
     def _build_menu(self) -> None:
         menubar = self.menuBar()
 
@@ -148,9 +174,19 @@ class MainWindow(QMainWindow):
         act_rerecord.triggered.connect(self._rerecord_golden)
         tools.addAction(act_rerecord)
 
+        act_fonts = QAction("🔤  ตั้งค่าฟ้อนต์", self)
+        act_fonts.setToolTip("เปลี่ยน font family และขนาดตัวอักษรทั่วทั้งแอป")
+        act_fonts.triggered.connect(lambda: self._go(IDX_FONT_SETTINGS))
+        tools.addAction(act_fonts)
+
+        act_ai = QAction("🤖  ตั้งค่า AI", self)
+        act_ai.setToolTip("ปรับ Model, Prompt Template, Output Format")
+        act_ai.triggered.connect(lambda: self._go(IDX_AI_SETTINGS))
+        tools.addAction(act_ai)
+
     def _build_status_bar(self) -> None:
         self._status_lbl = QLabel("พร้อมใช้งาน")
-        self._status_lbl.setFont(QFont("Consolas", 8))
+        self._status_lbl.setFont(_theme.make_font(_theme.FONT_SIZE_CAPTION))
         self.statusBar().addWidget(self._status_lbl)
 
     # ------------------------------------------------------------------
@@ -248,3 +284,12 @@ class MainWindow(QMainWindow):
         self._go(IDX_MONITOR)
         self._monitor_screen.start_session()
         self._status_lbl.setText("กำลัง Monitor...")
+
+    def _on_font_settings_saved(self, settings: dict) -> None:
+        """Apply saved font settings and refresh the global stylesheet."""
+        _theme.apply_font_settings(settings)
+        self.setStyleSheet(_build_stylesheet())
+        self._status_lbl.setFont(_theme.make_font(_theme.FONT_SIZE_CAPTION))
+        self._status_lbl.setText(
+            "OK: font '" + settings.get("font_family", "") + "' -- restart to apply all screens"
+        )

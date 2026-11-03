@@ -42,6 +42,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from ai.prompt_templates import (
     build_session_analysis_prompt,
     build_summary_prompt,
+    build_summary_prompt_from_settings,
     build_zone_improvement_prompt,
 )
 
@@ -263,9 +264,10 @@ class AnalysisWorker(QThread):
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-3.5-flash",
+        model: str = "gemini-2.0-flash",
         # Mode A — session_data dict (AI Summary Screen)
         session_data: dict | None = None,
+        ai_settings:  dict | None = None,   # from ConfigHandler.get_ai_settings()
         # Mode B — legacy individual fields (older callers)
         station_name: str = "",
         session_stats: dict | None = None,
@@ -278,8 +280,9 @@ class AnalysisWorker(QThread):
         super().__init__(parent)
         self._api_key       = api_key
         self._model         = model
-        self._session_data  = session_data           # Mode A
-        self._station_name  = station_name           # Mode B
+        self._session_data  = session_data
+        self._ai_settings   = ai_settings          # may be None -> legacy path
+        self._station_name  = station_name
         self._session_stats = session_stats or {}
         self._golden        = golden_standard or {}
         self._zone_names    = zone_names or {}
@@ -288,15 +291,28 @@ class AnalysisWorker(QThread):
 
     def run(self) -> None:
         try:
+            timeout = 60.0
+            model   = self._model
+            if self._ai_settings:
+                model   = self._ai_settings.get("model", model)
+                timeout = float(self._ai_settings.get("timeout", timeout))
+
             analyser = GeminiAnalyser(
-                api_key = self._api_key,
-                model   = self._model,
+                api_key    = self._api_key,
+                model      = model,
+                timeout    = timeout,
             )
             if self._session_data is not None:
-                # Mode A: AI Summary Screen path
-                text = analyser.analyse_summary(self._session_data)
+                if self._ai_settings:
+                    # Settings-driven path
+                    from ai.prompt_templates import build_summary_prompt_from_settings
+                    prompt = build_summary_prompt_from_settings(
+                        self._session_data, self._ai_settings
+                    )
+                    text = analyser._call_api(prompt)
+                else:
+                    text = analyser.analyse_summary(self._session_data)
             else:
-                # Mode B: legacy path
                 text = analyser.analyse_session(
                     station_name    = self._station_name,
                     session_stats   = self._session_stats,
