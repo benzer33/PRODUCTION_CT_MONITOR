@@ -433,6 +433,54 @@ class RTSPSource(BaseCameraSource):
 
 
 # ============================================================================
+# VideoFileSource
+# ============================================================================
+
+class VideoFileSource(BaseCameraSource):
+    """Recorded video file (mp4 / avi / mkv / mov …)."""
+
+    SOURCE_TYPE = "video_file"
+
+    def __init__(self, file_path: str, loop: bool = True) -> None:
+        self.file_path = file_path.strip()
+        self.loop      = loop
+
+    def build_capture_source(self) -> str:
+        return self.file_path
+
+    def validate(self) -> Optional[CameraConnectionResult]:
+        import os as _os
+        if not self.file_path:
+            return CameraConnectionResult.fail(
+                CameraErrorCode.INVALID_URL, "No file selected"
+            )
+        if not _os.path.isfile(self.file_path):
+            return CameraConnectionResult.fail(
+                CameraErrorCode.DEVICE_NOT_FOUND,
+                f"File not found: {self.file_path}",
+            )
+        return None
+
+    def to_dict(self) -> dict:
+        return {
+            "type":      self.SOURCE_TYPE,
+            "file_path": self.file_path,
+            "loop":      self.loop,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "VideoFileSource":
+        return cls(
+            file_path = d.get("file_path", ""),
+            loop      = d.get("loop", True),
+        )
+
+    def description(self) -> str:
+        import os as _os
+        return f"Video File  ({_os.path.basename(self.file_path)})"
+
+
+# ============================================================================
 # Source factory
 # ============================================================================
 
@@ -445,6 +493,8 @@ def source_from_dict(d: dict) -> BaseCameraSource:
         return IPCameraSource.from_dict(d)
     if t == RTSPSource.SOURCE_TYPE:
         return RTSPSource.from_dict(d)
+    if t == VideoFileSource.SOURCE_TYPE:
+        return VideoFileSource.from_dict(d)
     raise ValueError(f"Unknown camera type: {t!r}")
 
 
@@ -692,6 +742,16 @@ class CameraManager:
             ok, frame = False, None
 
         if not ok or frame is None:
+            # Video file: loop back to start instead of reconnecting
+            if isinstance(self._source, VideoFileSource) and self._source.loop:
+                self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ok, frame = self._cap.read()
+                if ok and frame is not None:
+                    self._fail_count = 0
+                    if self.mirror_horizontal:
+                        frame = cv2.flip(frame, 1)
+                    return True, frame
+
             self._fail_count += 1
             # Log the actual negotiated properties to help diagnose mismatch
             try:

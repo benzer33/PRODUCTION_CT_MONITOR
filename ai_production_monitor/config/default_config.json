@@ -6,13 +6,15 @@
     "station_01": {
       "name": "Assembly Line 1",
       "camera": {
-        "type": "webcam",
+        "type": "video_file",
         "device_index": 0,
         "url": "",
         "width": 1280,
         "height": 720,
         "fps": 30,
-        "mirror_horizontal": true
+        "mirror_horizontal": true,
+        "file_path": "C:/Users/ronnachai/Downloads/OK9.mp4",
+        "loop": true
       },
       "zones": [
         {
@@ -3150,7 +3152,16 @@
       "font_size_section": 12,
       "font_size_label": 10,
       "font_size_caption": 7
-    }
+    },
+    "rtsp_bookmarks": [
+      {
+        "name": "AAA",
+        "url": "XXXXXXXX",
+        "username": "",
+        "password": "",
+        "transport": "tcp"
+      }
+    ]
   },
   "ai_settings": {
     "model": "gemini-3.5-flash",

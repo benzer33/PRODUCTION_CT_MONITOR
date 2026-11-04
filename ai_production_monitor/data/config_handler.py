@@ -116,17 +116,23 @@ class ConfigHandler:
         height: int = 720,
         fps: int = 30,
         mirror_horizontal: bool = False,
+        file_path: str = "",
+        loop: bool = True,
         station_id: str | None = None,
     ) -> None:
-        self.get_station(station_id)["camera"] = {
-            "type": camera_type,
-            "device_index": device_index,
-            "url": url,
-            "width": width,
-            "height": height,
-            "fps": fps,
+        cam: dict = {
+            "type":              camera_type,
+            "device_index":      device_index,
+            "url":               url,
+            "width":             width,
+            "height":            height,
+            "fps":               fps,
             "mirror_horizontal": mirror_horizontal,
         }
+        if camera_type == "video_file":
+            cam["file_path"] = file_path
+            cam["loop"]      = loop
+        self.get_station(station_id)["camera"] = cam
 
     # ------------------------------------------------------------------
     # Zone config
@@ -226,6 +232,23 @@ class ConfigHandler:
     def set_show_skeleton(self, value: bool) -> None:
         """Persist hand skeleton overlay toggle across sessions."""
         self._data.setdefault("ui", {})["show_hand_skeleton"] = bool(value)
+        self.save()
+
+    # ------------------------------------------------------------------
+    # RTSP Bookmarks
+    # ------------------------------------------------------------------
+
+    def get_rtsp_bookmarks(self) -> list:
+        """Return saved RTSP presets.
+
+        Each entry is a dict with keys:
+            name, url, username, password, transport
+        """
+        return list(self._data.get("ui", {}).get("rtsp_bookmarks", []))
+
+    def set_rtsp_bookmarks(self, bookmarks: list) -> None:
+        """Persist RTSP bookmark list and save config."""
+        self._data.setdefault("ui", {})["rtsp_bookmarks"] = bookmarks
         self.save()
 
     # ------------------------------------------------------------------

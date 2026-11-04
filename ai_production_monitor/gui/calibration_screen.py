@@ -56,7 +56,7 @@ from gui.theme import (
     btn_stylesheet, groupbox_stylesheet,
     CLR_ACCENT, CLR_MUTED,
 )
-from vision.camera_handler import CameraHandler
+from vision.camera_handler import CameraHandler, camera_manager_from_config
 
 
 # ---------------------------------------------------------------------------
@@ -900,14 +900,7 @@ class CalibrationScreen(QWidget):
             self._toggle_live()   # stop live first
 
         cam_cfg = self._config.get_camera_config()
-        cam = CameraHandler(
-            camera_type        = cam_cfg.get("type",               "webcam"),
-            device_index       = cam_cfg.get("device_index",       0),
-            url                = cam_cfg.get("url",                ""),
-            width              = cam_cfg.get("width",              1280),
-            height             = cam_cfg.get("height",             720),
-            mirror_horizontal  = cam_cfg.get("mirror_horizontal",  False),
-        )
+        cam = camera_manager_from_config(cam_cfg)
         ok = cam.open()
         if ok:
             ret, frame = cam.read()
@@ -940,15 +933,7 @@ class CalibrationScreen(QWidget):
             self._lbl_live.setStyleSheet("color: #546e7a;")
         else:
             cam_cfg = self._config.get_camera_config()
-            self._camera = CameraHandler(
-                camera_type        = cam_cfg.get("type",               "webcam"),
-                device_index       = cam_cfg.get("device_index",       0),
-                url                = cam_cfg.get("url",                ""),
-                width              = cam_cfg.get("width",              1280),
-                height             = cam_cfg.get("height",             720),
-                fps                = cam_cfg.get("fps",                30),
-                mirror_horizontal  = cam_cfg.get("mirror_horizontal",  False),
-            )
+            self._camera = camera_manager_from_config(cam_cfg)
             if self._camera.open():
                 self._live = True
                 self._preview_timer.start()

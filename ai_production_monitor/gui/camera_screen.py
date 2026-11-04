@@ -71,6 +71,7 @@ from vision.camera_handler import (
     DeviceScanner,
     IPCameraSource,
     RTSPSource,
+    VideoFileSource,
     WebcamSource,
     camera_manager_from_config,
     source_from_dict,
@@ -195,6 +196,9 @@ class _WebcamPanel(QFrame):
 class _NetworkPanel(QFrame):
     """Settings for IP Camera and RTSP sources (URL + auth)."""
 
+    # Emitted when user saves / deletes a bookmark (RTSP mode only)
+    bookmark_save_requested = pyqtSignal(dict)
+
     def __init__(self, is_rtsp: bool = False, parent=None) -> None:
         super().__init__(parent)
         self._is_rtsp = is_rtsp
@@ -203,6 +207,42 @@ class _NetworkPanel(QFrame):
         layout.setContentsMargins(0, 4, 0, 4)
         layout.setSpacing(8)
         layout.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        # ---- Bookmark bar (RTSP only) ----
+        if is_rtsp:
+            bm_row = QHBoxLayout()
+            self.combo_bookmarks = QComboBox()
+            self.combo_bookmarks.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.combo_bookmarks.setStyleSheet(_INPUT_STYLE)
+            self.combo_bookmarks.setToolTip("เลือก RTSP ที่บันทึกไว้")
+            self.combo_bookmarks.currentIndexChanged.connect(self._on_bookmark_selected)
+            bm_row.addWidget(self.combo_bookmarks)
+
+            self.btn_bm_save = QPushButton("💾")
+            self.btn_bm_save.setFixedSize(28, 28)
+            self.btn_bm_save.setToolTip("บันทึก URL นี้เป็น Bookmark")
+            self.btn_bm_save.setStyleSheet(_BTN_STYLE)
+            self.btn_bm_save.clicked.connect(self._on_save_bookmark_clicked)
+            bm_row.addWidget(self.btn_bm_save)
+
+            self.btn_bm_del = QPushButton("🗑")
+            self.btn_bm_del.setFixedSize(28, 28)
+            self.btn_bm_del.setToolTip("ลบ Bookmark ที่เลือก")
+            self.btn_bm_del.setStyleSheet(_BTN_STYLE)
+            self.btn_bm_del.clicked.connect(self._on_delete_bookmark_clicked)
+            bm_row.addWidget(self.btn_bm_del)
+
+            layout.addRow(_lbl("Bookmark:"), bm_row)
+
+            self.edit_bm_name = QLineEdit()
+            self.edit_bm_name.setPlaceholderText("ชื่อกล้อง (เช่น  CDA-04  Line 1)")
+            self.edit_bm_name.setStyleSheet(_INPUT_STYLE)
+            layout.addRow(_lbl("ชื่อกล้อง:"), self.edit_bm_name)
+        else:
+            self.combo_bookmarks = None
+            self.btn_bm_save    = None
+            self.btn_bm_del     = None
+            self.edit_bm_name   = None
 
         # URL
         self.edit_url = QLineEdit()
@@ -264,6 +304,63 @@ class _NetworkPanel(QFrame):
         mode = QLineEdit.Normal if checked else QLineEdit.Password
         self.edit_pass.setEchoMode(mode)
 
+    # ---- Bookmark helpers ------------------------------------------------
+
+    def load_bookmarks(self, bookmarks: list) -> None:
+        """Populate the bookmark combo from a list of dicts."""
+        if self.combo_bookmarks is None:
+            return
+        self.combo_bookmarks.blockSignals(True)
+        self.combo_bookmarks.clear()
+        self.combo_bookmarks.addItem("— เลือก bookmark —", None)
+        for bm in bookmarks:
+            self.combo_bookmarks.addItem(bm.get("name", bm.get("url", "?")), bm)
+        self.combo_bookmarks.blockSignals(False)
+
+    def _on_bookmark_selected(self, idx: int) -> None:
+        if self.combo_bookmarks is None:
+            return
+        bm = self.combo_bookmarks.itemData(idx)
+        if not bm:
+            return
+        self.edit_url.setText(bm.get("url", ""))
+        self.edit_user.setText(bm.get("username", ""))
+        self.edit_pass.setText(bm.get("password", ""))
+        if self.edit_bm_name is not None:
+            self.edit_bm_name.setText(bm.get("name", ""))
+        if self.combo_transport is not None:
+            t = bm.get("transport", "tcp")
+            for i in range(self.combo_transport.count()):
+                if self.combo_transport.itemData(i) == t:
+                    self.combo_transport.setCurrentIndex(i)
+                    break
+
+    def _on_save_bookmark_clicked(self) -> None:
+        name = ""
+        if self.edit_bm_name is not None:
+            name = self.edit_bm_name.text().strip()
+        if not name:
+            name = self.edit_url.text().strip() or "unnamed"
+        bm = {
+            "name":      name,
+            "url":       self.edit_url.text().strip(),
+            "username":  self.edit_user.text().strip(),
+            "password":  self.edit_pass.text(),
+            "transport": self.transport() if self.combo_transport else "tcp",
+        }
+        self.bookmark_save_requested.emit(bm)
+
+    def _on_delete_bookmark_clicked(self) -> None:
+        if self.combo_bookmarks is None:
+            return
+        idx = self.combo_bookmarks.currentIndex()
+        bm = self.combo_bookmarks.itemData(idx)
+        if not bm:
+            return
+        bm_del = dict(bm)
+        bm_del["_delete"] = True
+        self.bookmark_save_requested.emit(bm_del)
+
     # ---- Getters ----
 
     def url(self)       -> str: return self.edit_url.text().strip()
@@ -285,6 +382,74 @@ class _NetworkPanel(QFrame):
                 if self.combo_transport.itemData(i) == v:
                     self.combo_transport.setCurrentIndex(i)
                     break
+
+
+# ============================================================================
+# Sub-panel: Video file source
+# ============================================================================
+
+class _VideoFilePanel(QFrame):
+    """Panel for selecting a recorded video file as the camera source."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet("QFrame { background: transparent; }")
+        layout = QFormLayout(self)
+        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setSpacing(8)
+        layout.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        # File path row
+        file_row = QHBoxLayout()
+        self.edit_path = QLineEdit()
+        self.edit_path.setPlaceholderText("เลือกไฟล์วีดีโอ...")
+        self.edit_path.setStyleSheet(_INPUT_STYLE)
+        self.edit_path.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        file_row.addWidget(self.edit_path)
+
+        self.btn_browse = QPushButton("📂")
+        self.btn_browse.setToolTip("เลือกไฟล์")
+        self.btn_browse.setFixedSize(28, 28)
+        self.btn_browse.setStyleSheet(_BTN_STYLE)
+        self.btn_browse.clicked.connect(self._browse_file)
+        file_row.addWidget(self.btn_browse)
+        layout.addRow(_lbl("ไฟล์:"), file_row)
+
+        # Loop checkbox
+        self.chk_loop = QCheckBox("เล่นวนซ้ำ  (Loop)")
+        self.chk_loop.setChecked(True)
+        self.chk_loop.setStyleSheet("color: #cfd8dc;")
+        layout.addRow("", self.chk_loop)
+
+        # Hint
+        hint = QLabel(
+            "รองรับ: .mp4  .avi  .mkv  .mov  .ts\n"
+            "วิ่งเร็วกว่า FPS จริง — กำหนด FPS ด้านล่างเพื่อควบคุมความเร็ว"
+        )
+        hint.setFont(make_font(FONT_SIZE_CAPTION))
+        hint.setStyleSheet("color: #455a64; font-style: italic;")
+        hint.setWordWrap(True)
+        layout.addRow("", hint)
+
+    def _browse_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "เลือกไฟล์วีดีโอ",
+            self.edit_path.text() or "",
+            "Video Files (*.mp4 *.avi *.mkv *.mov *.ts *.wmv *.flv);;All Files (*)",
+        )
+        if path:
+            self.edit_path.setText(path)
+
+    # ---- Getters ----
+
+    def file_path(self) -> str:  return self.edit_path.text().strip()
+    def loop(self)      -> bool: return self.chk_loop.isChecked()
+
+    # ---- Setters ----
+
+    def set_file_path(self, v: str)  -> None: self.edit_path.setText(v)
+    def set_loop(self, v: bool)      -> None: self.chk_loop.setChecked(v)
 
 
 # ============================================================================
@@ -368,9 +533,10 @@ _CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 # Camera type display names and their keys
 _CAM_TYPES = [
-    ("Webcam  (USB / Built-in)",    "webcam"),
-    ("IP Camera  (HTTP / MJPEG)",   "ip_camera"),
-    ("RTSP Stream  (NVR / IP Cam)", "rtsp"),
+    ("Webcam  (USB / Built-in)",       "webcam"),
+    ("IP Camera  (HTTP / MJPEG)",      "ip_camera"),
+    ("RTSP Stream  (NVR / IP Cam)",    "rtsp"),
+    ("Video File  (.mp4 / .avi / .mkv)", "video_file"),
 ]
 
 
@@ -472,16 +638,20 @@ class CameraScreen(QWidget):
         src_lay = QVBoxLayout(src_grp)
 
         self._stack = QStackedWidget()
-        self._panel_webcam   = _WebcamPanel()
-        self._panel_ip       = _NetworkPanel(is_rtsp=False)
-        self._panel_rtsp     = _NetworkPanel(is_rtsp=True)
-        self._stack.addWidget(self._panel_webcam)    # index 0
-        self._stack.addWidget(self._panel_ip)        # index 1
-        self._stack.addWidget(self._panel_rtsp)      # index 2
+        self._panel_webcam      = _WebcamPanel()
+        self._panel_ip          = _NetworkPanel(is_rtsp=False)
+        self._panel_rtsp        = _NetworkPanel(is_rtsp=True)
+        self._panel_video_file  = _VideoFilePanel()
+        self._stack.addWidget(self._panel_webcam)       # index 0
+        self._stack.addWidget(self._panel_ip)           # index 1
+        self._stack.addWidget(self._panel_rtsp)         # index 2
+        self._stack.addWidget(self._panel_video_file)   # index 3
         src_lay.addWidget(self._stack)
 
         # Wire scan button
         self._panel_webcam.btn_scan.clicked.connect(self._start_device_scan)
+        # Wire RTSP bookmark save/delete
+        self._panel_rtsp.bookmark_save_requested.connect(self._on_bookmark_save_requested)
         layout.addWidget(src_grp)
 
         # ── Capture settings ──
@@ -589,9 +759,10 @@ class CameraScreen(QWidget):
         self._stack.setCurrentIndex(idx)
         key = self._combo_type.itemData(idx)
         self._lbl_source_desc.setText({
-            "webcam":    "USB / Built-in camera",
-            "ip_camera": "HTTP / MJPEG network stream",
-            "rtsp":      "RTSP stream (NVR / IP camera)",
+            "webcam":     "USB / Built-in camera",
+            "ip_camera":  "HTTP / MJPEG network stream",
+            "rtsp":       "RTSP stream (NVR / IP camera)",
+            "video_file": "Recorded video file",
         }.get(key, ""))
         # Auto-trigger scan when switching to webcam with no devices listed
         if key == "webcam" and self._panel_webcam.combo_device.count() <= 1:
@@ -707,6 +878,11 @@ class CameraScreen(QWidget):
                     username = self._panel_ip.username(),
                     password = self._panel_ip.password(),
                 )
+            elif type_key == "video_file":
+                source = VideoFileSource(
+                    file_path = self._panel_video_file.file_path(),
+                    loop      = self._panel_video_file.loop(),
+                )
             else:
                 source = RTSPSource(
                     url       = self._panel_rtsp.url(),
@@ -768,6 +944,11 @@ class CameraScreen(QWidget):
             base["url"]          = self._panel_ip.url()
             base["username"]     = self._panel_ip.username()
             base["password"]     = self._panel_ip.password()
+        elif type_key == "video_file":
+            base["device_index"] = 0
+            base["url"]          = ""
+            base["file_path"]    = self._panel_video_file.file_path()
+            base["loop"]         = self._panel_video_file.loop()
         else:
             base["device_index"] = 0
             base["url"]          = self._panel_rtsp.url()
@@ -813,6 +994,8 @@ class CameraScreen(QWidget):
             height             = cfg["height"],
             fps                = cfg["fps"],
             mirror_horizontal  = cfg["mirror_horizontal"],
+            file_path          = cfg.get("file_path", ""),
+            loop               = cfg.get("loop", True),
         )
         self._config.save()
 
@@ -833,6 +1016,10 @@ class CameraScreen(QWidget):
 
         self._apply_config_to_ui(cfg)
 
+        # Load RTSP bookmarks into the RTSP panel
+        bookmarks = self._config.get_rtsp_bookmarks()
+        self._panel_rtsp.load_bookmarks(bookmarks)
+
     def _apply_config_to_ui(self, cfg: dict) -> None:
         type_key = cfg.get("type", "webcam")
         # Set combo
@@ -849,6 +1036,9 @@ class CameraScreen(QWidget):
             self._panel_ip.set_url(cfg.get("url", ""))
             self._panel_ip.set_username(cfg.get("username", ""))
             self._panel_ip.set_password(cfg.get("password", ""))
+        elif type_key == "video_file":
+            self._panel_video_file.set_file_path(cfg.get("file_path", ""))
+            self._panel_video_file.set_loop(cfg.get("loop", True))
         else:
             self._panel_rtsp.set_url(cfg.get("url", ""))
             self._panel_rtsp.set_username(cfg.get("username", ""))
@@ -866,6 +1056,33 @@ class CameraScreen(QWidget):
         self._spin_fps.setValue(cfg.get("fps", 30))
         self._chk_reconnect.setChecked(cfg.get("reconnect_on_failure", True))
         self._chk_mirror.setChecked(cfg.get("mirror_horizontal", False))
+
+    # ================================================================== #
+    # Bookmark management
+    # ================================================================== #
+
+    def _on_bookmark_save_requested(self, bm: dict) -> None:
+        """Save or delete an RTSP bookmark entry in config."""
+        bookmarks = self._config.get_rtsp_bookmarks()
+        if bm.get("_delete"):
+            bookmarks = [
+                b for b in bookmarks
+                if not (b.get("name") == bm.get("name")
+                        and b.get("url") == bm.get("url"))
+            ]
+        else:
+            # Upsert by name
+            updated = False
+            for i, b in enumerate(bookmarks):
+                if b.get("name") == bm.get("name"):
+                    bookmarks[i] = bm
+                    updated = True
+                    break
+            if not updated:
+                bookmarks.append(bm)
+
+        self._config.set_rtsp_bookmarks(bookmarks)
+        self._panel_rtsp.load_bookmarks(bookmarks)
 
     # ================================================================== #
     # Navigation
