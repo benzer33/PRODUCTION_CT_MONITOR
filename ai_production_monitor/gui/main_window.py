@@ -161,6 +161,12 @@ class MainWindow(QMainWindow):
         self._detector_settings_screen.back_requested.connect(
             lambda: self._go(IDX_CAMERA)
         )
+        self._detector_settings_screen.config_saved.connect(
+            self._monitor_screen.notify_detector_config_changed
+        )
+        self._detector_settings_screen.config_saved.connect(
+            self._golden_screen.notify_detector_config_changed
+        )
 
     def _build_menu(self) -> None:
         menubar = self.menuBar()

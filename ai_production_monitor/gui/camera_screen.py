@@ -1199,8 +1199,13 @@ class CameraScreen(QWidget):
         self._on_det_backend_changed()
 
     def _build_detector_config_dict(self) -> dict:
-        """Read Hand Detection widgets into a detector-config dict."""
+        """Read Hand Detection widgets into a detector-config dict.
+        Merge with existing config to preserve keys managed by DetectorSettingsScreen
+        (e.g. active_hand, hand_dot_radius) that camera_screen does not expose.
+        """
+        existing = self._config.get_detector_config()
         return {
+            **existing,   # keep active_hand, hand_dot_radius, etc.
             "backend":          self._combo_det_backend.currentData(),
             "mp_max_hands":     2,
             "mp_detection_conf": self._spin_mp_detect.value(),

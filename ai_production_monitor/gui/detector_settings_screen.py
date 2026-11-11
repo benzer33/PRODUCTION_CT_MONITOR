@@ -251,7 +251,8 @@ class _ProbeWorker(QThread):
 class DetectorSettingsScreen(QWidget):
     """Standalone hand-detector settings + status screen."""
 
-    back_requested = pyqtSignal()
+    back_requested   = pyqtSignal()
+    config_saved     = pyqtSignal()   # เมื่อ save → main_window จะ notify thread
 
     def __init__(self, config: ConfigHandler, parent=None) -> None:
         super().__init__(parent)
@@ -355,6 +356,33 @@ class DetectorSettingsScreen(QWidget):
         )
         f_yolo.addRow(self._lbl("เลื่อนมือ:"), self._spin_extend)
         lay.addWidget(self._grp_yolo)
+
+        # Hand Filter + Visual group (ใช้ได้กับทั้ง MediaPipe และ YOLO)
+        grp_filter = self._grp("Hand Filter & Visual")
+        f_filter   = QFormLayout(grp_filter)
+
+        self._combo_active_hand = QComboBox()
+        self._combo_active_hand.addItem("ทั้งสองมือ (Both)",  "Both")
+        self._combo_active_hand.addItem("มือขวา (Right)",     "Right")
+        self._combo_active_hand.addItem("มือซ้าย (Left)",     "Left")
+        self._combo_active_hand.setStyleSheet(_INPUT_STYLE)
+        self._combo_active_hand.setFont(make_font(FONT_SIZE_BODY))
+        self._combo_active_hand.setToolTip(
+            "กรองมือที่ใช้ตรวจจับโซน\n"
+            "Both = ทั้งสองมือทำงานพร้อมกัน\n"
+            "Right/Left = ใช้มือเดียว อีกข้างไม่ trigger โซน"
+        )
+        f_filter.addRow(self._lbl("มือที่ใช้:"), self._combo_active_hand)
+
+        self._spin_dot_radius = QDoubleSpinBox()
+        self._spin_dot_radius.setRange(4, 60)
+        self._spin_dot_radius.setSingleStep(2)
+        self._spin_dot_radius.setDecimals(0)
+        self._spin_dot_radius.setValue(10)
+        self._spin_dot_radius.setStyleSheet(_INPUT_STYLE)
+        self._spin_dot_radius.setToolTip("ขนาดจุดแสดงตำแหน่งมือบนหน้าจอ (pixels)")
+        f_filter.addRow(self._lbl("ขนาดจุดมือ:"), self._spin_dot_radius)
+        lay.addWidget(grp_filter)
 
         lay.addStretch()
 
@@ -539,6 +567,13 @@ class DetectorSettingsScreen(QWidget):
                 self._combo_device.setCurrentIndex(i)
                 break
         self._spin_extend.setValue(cfg.get("yolo_hand_extend", 0.35))
+        # active_hand
+        active_hand = cfg.get("active_hand", "Both")
+        for i in range(self._combo_active_hand.count()):
+            if self._combo_active_hand.itemData(i) == active_hand:
+                self._combo_active_hand.setCurrentIndex(i)
+                break
+        self._spin_dot_radius.setValue(cfg.get("hand_dot_radius", 10))
         self._on_backend_changed()
 
     def _save(self) -> None:
@@ -552,9 +587,12 @@ class DetectorSettingsScreen(QWidget):
             "yolo_device":       self._combo_device.currentData(),
             "yolo_kp_conf_min":  0.3,
             "yolo_hand_extend":  self._spin_extend.value(),
+            "active_hand":       self._combo_active_hand.currentData(),
+            "hand_dot_radius":   int(self._spin_dot_radius.value()),
         }
         self._config.set_detector_config(cfg)
         self._log.append("✅ บันทึกการตั้งค่าแล้ว")
+        self.config_saved.emit()
 
     def _run_probe(self) -> None:
         if self._worker and self._worker.isRunning():

@@ -501,6 +501,9 @@ class FrameResult:
     # NOTE: core trigger logic uses ONLY hand_x/hand_y above — this field is
     # strictly for the GUI rendering layer and must never influence trigger state.
     full_landmarks:   dict = None  # dict[str, list[NormalizedLandmark]]
+    # Visual-only: per-hand centroid positions after active_hand filter.
+    # dict["Left"|"Right"] = (x_pixels, y_pixels)
+    hand_positions_by_side: dict = None
 
     def __post_init__(self):
         if self.trigger_events is None:
@@ -509,8 +512,8 @@ class FrameResult:
             self.point_states_by_hand = {}
         if self.full_landmarks is None:
             self.full_landmarks = {}
-
-
+        if self.hand_positions_by_side is None:
+            self.hand_positions_by_side = {}
 class PointTriggerDetector:
     """
     Orchestrator ที่รวม:
@@ -538,6 +541,7 @@ class PointTriggerDetector:
         trigger_confirm:  int = 5,
         clear_confirm:    int = 8,
         use_palm_centroid: bool = True,
+        active_hand:      str = "Both",    # "Both" | "Left" | "Right"
         on_trigger:       Optional[Callable] = None,  # (point_id, ts, pos, handedness)
         on_state_change:  Optional[Callable] = None,  # (point_id, new_state, handedness)
         on_hand_position: Optional[Callable[[float, float], None]]      = None,
@@ -546,6 +550,9 @@ class PointTriggerDetector:
         self._trigger_confirm = trigger_confirm
         self._clear_confirm   = clear_confirm
         self._use_palm        = use_palm_centroid
+        # Normalise active_hand to title-case; "both" → accept all hands
+        _ah = active_hand.strip().title()   # "left"→"Left", "both"→"Both"
+        self._active_hand     = _ah if _ah in ("Left", "Right") else "Both"
         self._on_trigger      = on_trigger
         self._on_state_change = on_state_change
         self._on_hand_pos     = on_hand_position
@@ -619,6 +626,11 @@ class PointTriggerDetector:
         """Reset state ทุกจุด (ทุก hand) กลับ WAITING_FOR_CLEAR พร้อมเริ่มรอบใหม่"""
         for machine in self._machines.values():
             machine.reset()
+
+    def set_active_hand(self, active_hand: str) -> None:
+        """เปลี่ยน active_hand filter โดยไม่ต้อง restart detector/thread"""
+        _ah = active_hand.strip().title()
+        self._active_hand = _ah if _ah in ("Left", "Right") else "Both"
 
     def reset_cycle(self) -> None:
         """
@@ -707,6 +719,13 @@ class PointTriggerDetector:
         point_states_by_hand = {}
 
         for (pid, hand), machine in self._machines.items():
+            # Skip this hand if active_hand filter is set
+            if self._active_hand != "Both" and hand != self._active_hand:
+                # Keep machine idle (treat as "not on point") so it doesn't fire
+                machine.update(on_point=False, hand_pos=(0.0, 0.0), timestamp=ts)
+                point_states_by_hand[(pid, hand)] = machine.state
+                continue
+
             hr_for_hand = hands_by_side.get(hand)
             if hr_for_hand is not None and hr_for_hand.detected:
                 _is_mediapipe_lm = (
@@ -748,11 +767,21 @@ class PointTriggerDetector:
             if prev is None or _STATE_PRIORITY.get(state, 0) > _STATE_PRIORITY.get(prev, 0):
                 point_states[pid] = state
 
-        # Build per-hand landmark dict (visual-only, does NOT affect trigger logic)
+        # Build per-hand landmark dict — filter by active_hand (visual + skeleton)
         full_landmarks_dict: dict = {}
+        hand_positions_by_side: dict = {}
         for hr in all_hands:
             if hr.detected and hr.landmarks:
-                full_landmarks_dict[hr.handedness] = hr.landmarks
+                if self._active_hand == "Both" or hr.handedness == self._active_hand:
+                    full_landmarks_dict[hr.handedness] = hr.landmarks
+            # Compute centroid position for each active hand (for dot drawing)
+            if hr.detected and (self._active_hand == "Both" or hr.handedness == self._active_hand):
+                _is_mp = self._use_palm and hr.landmarks and len(hr.landmarks) == 21
+                if _is_mp:
+                    _px, _py = self._palm_centroid(hr.landmarks, frame.shape[1], frame.shape[0])
+                else:
+                    _px, _py = hr.x, hr.y
+                hand_positions_by_side[hr.handedness] = (_px, _py)
 
         return FrameResult(
             hand_detected        = bool(all_hands),
@@ -765,6 +794,7 @@ class PointTriggerDetector:
             trigger_events       = trigger_events,
             point_states_by_hand = point_states_by_hand,
             full_landmarks       = full_landmarks_dict,
+            hand_positions_by_side = hand_positions_by_side,
         )
 
 

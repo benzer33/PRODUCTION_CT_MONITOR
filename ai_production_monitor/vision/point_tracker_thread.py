@@ -133,6 +133,12 @@ class PointTrackerThread(QThread):
         if self._detector:
             self._detector.reset_cycle()
 
+    def update_detector_config(self) -> None:
+        """อัพเดท active_hand และ hand_dot_radius จาก config โดยไม่ต้อง restart thread"""
+        if self._detector:
+            det_cfg = self._config.get_detector_config()
+            self._detector.set_active_hand(det_cfg.get("active_hand", "Both"))
+
     def request_trajectory(self) -> None:
         """
         ขอ trajectory ของ cycle ล่าสุด → emit cycle_trajectory_ready signal
@@ -163,7 +169,13 @@ class PointTrackerThread(QThread):
 
         # Build hand detector from config
         from vision.hand_tracker import create_detector
+        import logging as _logging
         det_cfg      = self._config.get_detector_config()
+        _logging.getLogger(__name__).info(
+            "PointTrackerThread: active_hand=%r hand_dot_radius=%r",
+            det_cfg.get("active_hand", "Both"),
+            det_cfg.get("hand_dot_radius", 10),
+        )
         hand_detector = create_detector(det_cfg)
 
         self._detector = PointTriggerDetector(
@@ -171,6 +183,7 @@ class PointTrackerThread(QThread):
             trigger_confirm   = station_cfg.get("trigger_confirm_frames", 5),
             clear_confirm     = station_cfg.get("clear_confirm_frames", 8),
             use_palm_centroid = True,
+            active_hand       = det_cfg.get("active_hand", "Both"),
             on_trigger        = self._cb_trigger,
             on_state_change   = self._cb_state_change,
             on_hand_position  = self._cb_hand_pos,
@@ -358,11 +371,15 @@ class PointTrackerThread(QThread):
                             (0, 220, 255), 2, cv2.LINE_AA,
                         )
 
-        # วาดตำแหน่งมือ
+        # วาดตำแหน่งมือ — วาดแต่ละมือที่ผ่าน active_hand filter เท่านั้น
         if self.show_hand and result.hand_detected:
-            hx, hy = int(result.hand_x), int(result.hand_y)
-            cv2.circle(out, (hx, hy), 10, (0, 200, 255), -1)
-            cv2.circle(out, (hx, hy), 14, (0, 200, 255), 2)
+            det_cfg = self._config.get_detector_config()
+            dot_r   = int(det_cfg.get("hand_dot_radius", 10))
+            pos_map = result.hand_positions_by_side or {}
+            for _hand, (_hx, _hy) in pos_map.items():
+                hx, hy = int(_hx), int(_hy)
+                cv2.circle(out, (hx, hy), dot_r,     (0, 200, 255), -1)
+                cv2.circle(out, (hx, hy), dot_r + 4, (0, 200, 255), 2)
 
         return out
 

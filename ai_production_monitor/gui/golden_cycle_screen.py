@@ -402,6 +402,11 @@ class GoldenCycleScreen(QWidget):
         if len(self._recorded_cycles) >= self._min_cycles:
             self._btn_compute.setEnabled(True)
 
+    def notify_detector_config_changed(self) -> None:
+        """เรียกจาก main_window เมื่อ detector settings ถูก save — อัพเดท thread ทันที"""
+        if self._tracker_thread:
+            self._tracker_thread.update_detector_config()
+
     def _compute_standard(self) -> None:
         if not self._recorded_cycles:
             return

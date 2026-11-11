@@ -267,6 +267,9 @@ class ConfigHandler:
         "yolo_device":        "cpu",      # cpu = stable; cuda = needs matching driver
         "yolo_kp_conf_min":   0.3,
         "yolo_hand_extend":   0.35,        # fraction of forearm to extend past wrist
+        # Hand filter + visual
+        "active_hand":        "Both",      # "Both" | "Left" | "Right"
+        "hand_dot_radius":    10,          # pixel radius of hand position dot
     }
 
     def get_detector_config(self) -> dict:

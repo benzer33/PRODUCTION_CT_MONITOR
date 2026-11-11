@@ -578,6 +578,11 @@ class MonitorScreen(QWidget):
     # Signal handlers
     # ------------------------------------------------------------------
 
+    def notify_detector_config_changed(self) -> None:
+        """เรียกจาก main_window เมื่อ detector settings ถูก save — อัพเดท thread ทันที"""
+        if self._tracker_thread:
+            self._tracker_thread.update_detector_config()
+
     # ------------------------------------------------------------------
     # Ghost overlay helpers
     # ------------------------------------------------------------------
