@@ -305,3 +305,277 @@ class HandTracker:
             self._hands.close()
         except Exception:
             pass
+
+
+# ===========================================================================
+# Abstract detector interface
+# ===========================================================================
+
+from abc import ABC, abstractmethod
+
+
+class BaseHandDetector(ABC):
+    """
+    Common interface for all hand/wrist detection backends.
+
+    process_all(frame) must return list[HandResult] where each entry
+    has .handedness = "Left" | "Right" and pixel-space .x / .y (wrist).
+    The list is empty when no hands are detected.
+    """
+
+    @abstractmethod
+    def process_all(self, frame: np.ndarray) -> list:
+        """Return list[HandResult], one per detected hand."""
+
+    def close(self) -> None:
+        """Release resources.  Override if needed."""
+
+
+# ===========================================================================
+# MediaPipe backend  (wraps existing HandTracker.process_all)
+# ===========================================================================
+
+class MediaPipeHandDetector(BaseHandDetector):
+    """MediaPipe Hands — good for close / front-facing views."""
+
+    def __init__(
+        self,
+        max_num_hands: int = 2,
+        detection_confidence: float = 0.6,
+        tracking_confidence: float = 0.5,
+    ) -> None:
+        self._tracker = HandTracker(
+            max_num_hands        = max_num_hands,
+            detection_confidence = detection_confidence,
+            tracking_confidence  = tracking_confidence,
+        )
+
+    def process_all(self, frame: np.ndarray) -> list:
+        return self._tracker.process_all(frame)
+
+    def close(self) -> None:
+        self._tracker.close()
+
+
+# ===========================================================================
+# YOLO Pose backend  (ultralytics — optional dependency)
+# ===========================================================================
+
+# COCO 17-point skeleton wrist indices
+_YOLO_LEFT_WRIST  = 9
+_YOLO_RIGHT_WRIST = 10
+# Minimum keypoint confidence to accept
+_YOLO_KP_CONF_MIN = 0.3
+
+
+class YoloPoseDetector(BaseHandDetector):
+    """
+    YOLOv8/v11-Pose wrist detector.
+
+    Detects people in the frame and extracts wrist keypoints as
+    HandResult objects.  Works well at long range and overhead angles.
+
+    Requires:  pip install ultralytics
+
+    Parameters
+    ----------
+    model_name       : YOLO model weights, e.g. "yolov8n-pose.pt"
+    confidence       : person detection confidence threshold
+    device           : "cpu" | "cuda" | "mps" (empty = auto)
+    kp_conf_min      : minimum keypoint confidence to accept a wrist
+    """
+
+    def __init__(
+        self,
+        model_name:   str   = "yolov8n-pose.pt",
+        confidence:   float = 0.4,
+        device:       str   = "",
+        kp_conf_min:  float = _YOLO_KP_CONF_MIN,
+        hand_extend:  float = 0.35,
+    ) -> None:
+        try:
+            import sys as _sys
+
+            # When running as PyInstaller bundle (frozen=True), torchvision is
+            # excluded so ultralytics.models.sam / fastsam / rtdetr cannot load.
+            # Pre-register empty stub modules so those imports become no-ops.
+            # On dev machine (frozen=False) use normal import — no stubs needed.
+            if getattr(_sys, "frozen", False):
+                import os as _os
+                import types as _types
+
+                # Ensure torch DLLs are findable before any import
+                _meipass = getattr(_sys, "_MEIPASS", "")
+                if _meipass:
+                    try:
+                        _os.add_dll_directory(_meipass)
+                        _torch_lib = _os.path.join(_meipass, "torch", "lib")
+                        if _os.path.isdir(_torch_lib):
+                            _os.add_dll_directory(_torch_lib)
+                    except Exception:
+                        pass
+                _STUB_MODS = [
+                    "ultralytics.models.fastsam",
+                    "ultralytics.models.sam",
+                    "ultralytics.models.sam.model",
+                    "ultralytics.models.sam.predict",
+                    "ultralytics.models.sam.sam3",
+                    "ultralytics.models.rtdetr",
+                ]
+                for _mod_name in _STUB_MODS:
+                    if _mod_name not in _sys.modules:
+                        _stub = _types.ModuleType(_mod_name)
+                        # Give the stub any name the parent __init__ tries to import
+                        # e.g.  from .fastsam import FastSAM  →  FastSAM = None
+                        _stub.__dict__.update({
+                            "FastSAM": None, "SAM": None, "RTDETR": None,
+                            "Predictor": None, "SAM2Predictor": None,
+                            "SAM3Predictor": None, "Prompt": None,
+                        })
+                        _sys.modules[_mod_name] = _stub
+
+                import importlib as _importlib
+                _yolo_mod = _importlib.import_module("ultralytics.models.yolo")
+                _YOLO = _yolo_mod.YOLO
+            else:
+                from ultralytics import YOLO as _YOLO
+
+        except Exception as exc:
+            raise ImportError(
+                "ไม่สามารถโหลด ultralytics ได้\n"
+                f"สาเหตุ: {exc}\n"
+                "ลอง: pip install ultralytics  หรือตรวจสอบ CUDA/GPU driver"
+            ) from exc
+
+        # When running as a PyInstaller bundle, model files are extracted
+        # to sys._MEIPASS/models/.  Check there first before using the raw name
+        # (which would trigger an internet download on the target machine).
+        import sys, os
+        resolved_model = model_name
+        if getattr(sys, "frozen", False):
+            bundle_dir = sys._MEIPASS  # type: ignore[attr-defined]
+            candidate = os.path.join(bundle_dir, "models", os.path.basename(model_name))
+            if os.path.isfile(candidate):
+                resolved_model = candidate
+
+        self._model       = _YOLO(resolved_model)
+        self._confidence  = confidence
+        self._device      = device if device else "cpu"  # never auto — cpu is safest
+        self._kp_min      = kp_conf_min
+        self._hand_extend = hand_extend
+
+    def process_all(self, frame: np.ndarray) -> list:
+        """Run YOLO Pose inference and return body-skeleton HandResults."""
+        kwargs: dict = {"conf": self._confidence, "verbose": False}
+        if self._device:
+            kwargs["device"] = self._device
+
+        results = self._model(frame, **kwargs)
+        hand_results: list = []
+
+        for r in results:
+            if r.keypoints is None:
+                continue
+            kps = r.keypoints.data  # shape (N_persons, 17, 3) — x, y, conf
+            for person_kps in kps:
+                # Build a simple object list mimicking NormalizedLandmark so that
+                # the skeleton overlay (landmarks_to_pixels) can consume them.
+                # YOLO gives absolute pixel coords, so x_norm/y_norm = x/y.
+                class _KP:
+                    __slots__ = ("x", "y")
+                    def __init__(self, x, y):
+                        self.x = float(x)
+                        self.y = float(y)
+
+                h_frame, w_frame = frame.shape[:2]
+                landmarks_px = [
+                    _KP(float(person_kps[i][0]), float(person_kps[i][1]))
+                    for i in range(17)
+                ]
+
+                # Use left-wrist (idx 9) as the primary trigger position.
+                # Fall back to right-wrist (idx 10) if left is invisible.
+                # Estimate hand-center by extending elbow→wrist vector.
+                # elbow indices: 7=left_elbow, 8=right_elbow
+                _YOLO_LEFT_ELBOW  = 7
+                _YOLO_RIGHT_ELBOW = 8
+
+                def _wrist_to_hand(elbow_kp, wrist_kp, factor=self._hand_extend):
+                    """Estimate hand-center by extending elbow→wrist vector."""
+                    ex, ey = float(elbow_kp[0]), float(elbow_kp[1])
+                    wx_, wy_ = float(wrist_kp[0]), float(wrist_kp[1])
+                    dx, dy = wx_ - ex, wy_ - ey
+                    return wx_ + dx * factor, wy_ + dy * factor
+
+                lw = person_kps[_YOLO_LEFT_WRIST]
+                rw = person_kps[_YOLO_RIGHT_WRIST]
+
+                for wrist_kp, elbow_idx, handedness in [
+                    (lw, _YOLO_LEFT_ELBOW,  "Left"),
+                    (rw, _YOLO_RIGHT_ELBOW, "Right"),
+                ]:
+                    if float(wrist_kp[2]) < self._kp_min:
+                        continue  # keypoint not visible enough
+                    elbow_kp = person_kps[elbow_idx]
+                    hx, hy = _wrist_to_hand(elbow_kp, wrist_kp)
+                    hand_results.append(HandResult(
+                        detected   = True,
+                        x          = hx,
+                        y          = hy,
+                        x_norm     = 0.0,
+                        y_norm     = 0.0,
+                        landmarks  = landmarks_px,   # 17 COCO keypoints
+                        hand_label = handedness,
+                        handedness = handedness,
+                    ))
+
+        return hand_results
+
+    def close(self) -> None:
+        pass
+
+
+# ===========================================================================
+# Factory — build the right detector from a config dict
+# ===========================================================================
+
+def create_detector(cfg: dict) -> BaseHandDetector:
+    """
+    Build a hand detector from a detector-config dict.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    backend = cfg.get("backend", "mediapipe")
+    _log.info("create_detector: backend=%s  cfg=%s", backend, cfg)
+
+    if backend == "yolo_pose":
+        model_name = cfg.get("yolo_model", "yolov8n-pose.pt")
+        _log.info("YoloPoseDetector: loading model '%s'", model_name)
+        try:
+            det = YoloPoseDetector(
+                model_name   = model_name,
+                confidence   = cfg.get("yolo_confidence",  0.4),
+                device       = cfg.get("yolo_device",      ""),
+                kp_conf_min  = cfg.get("yolo_kp_conf_min", 0.3),
+                hand_extend  = cfg.get("yolo_hand_extend", 0.35),
+            )
+            _log.info("YoloPoseDetector: loaded OK")
+            return det
+        except Exception as e:
+            _log.error("YoloPoseDetector FAILED — falling back to MediaPipe: %s", e, exc_info=True)
+            import warnings
+            warnings.warn(
+                f"[YoloPoseDetector] โหลดไม่สำเร็จ: {e}\n"
+                "→ fallback ไปใช้ MediaPipe แทน",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+    # Default: MediaPipe
+    return MediaPipeHandDetector(
+        max_num_hands        = cfg.get("mp_max_hands",       2),
+        detection_confidence = cfg.get("mp_detection_conf",  0.6),
+        tracking_confidence  = cfg.get("mp_tracking_conf",   0.5),
+    )
+

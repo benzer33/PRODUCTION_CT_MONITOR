@@ -13,7 +13,7 @@ Features
 from __future__ import annotations
 
 import numpy as np
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt, QRect, QSize
 from PyQt5.QtGui import QImage, QPainter, QPixmap, QColor, QFont
 from PyQt5.QtWidgets import QWidget, QSizePolicy
 
@@ -61,6 +61,30 @@ class VideoWidget(QWidget):
         self._pixmap    = None
         self._no_signal = True
         self.update()
+
+    def image_rect(self) -> QRect:
+        """Return the QRect of the actual rendered image inside the widget.
+
+        Accounts for letterbox/pillarbox padding so that callers can map
+        frame-pixel coordinates to widget-pixel coordinates correctly.
+        Returns the full widget rect when no frame has been set yet.
+        """
+        if self._pixmap is None:
+            return self.rect()
+        scaled_w = self._pixmap.width()
+        scaled_h = self._pixmap.height()
+        # Replicate the same scaling used in paintEvent
+        sw = self.width()
+        sh = self.height()
+        if scaled_w == 0 or scaled_h == 0:
+            return self.rect()
+        # KeepAspectRatio: fit inside (sw, sh)
+        ratio = min(sw / scaled_w, sh / scaled_h)
+        dw = int(scaled_w * ratio)
+        dh = int(scaled_h * ratio)
+        x  = (sw - dw) // 2
+        y  = (sh - dh) // 2
+        return QRect(x, y, dw, dh)
 
     # ------------------------------------------------------------------
     # Qt overrides

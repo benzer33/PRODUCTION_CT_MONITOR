@@ -12,6 +12,48 @@ block_cipher = None
 # ---------------------------------------------------------------------------
 mediapipe_datas = collect_data_files("mediapipe")
 
+# ---------------------------------------------------------------------------
+# Collect ultralytics data files (yaml configs, assets, cfg)
+# ใช้ try/except เผื่อเครื่องที่ build ไม่ได้ติดตั้ง ultralytics
+# ---------------------------------------------------------------------------
+try:
+	ultralytics_datas   = collect_data_files("ultralytics")
+	ultralytics_hidden  = collect_submodules("ultralytics")
+except Exception:
+	ultralytics_datas   = []
+	ultralytics_hidden  = []
+
+# ---------------------------------------------------------------------------
+# Bundle YOLO model weights (.pt) from ultralytics cache or local folder
+# ไฟล์ .pt จะถูก bundle ไปที่ models/ ใน dist
+# ถ้าไม่มีไฟล์ก็ข้ามไป (mediapipe ยังทำงานได้ปกติ)
+# ---------------------------------------------------------------------------
+import os, glob as _glob
+
+def _find_pt_files():
+	"""Find .pt files from common cache locations."""
+	candidates = []
+	# 1. Local folder next to spec file
+	local = _glob.glob(os.path.join(os.path.dirname(os.path.abspath("build_exe.spec")), "*.pt"))
+	candidates.extend(local)
+	# 2. ultralytics default cache  %USERPROFILE%\AppData\Roaming\Ultralytics\
+	cache = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "Ultralytics")
+	if os.path.isdir(cache):
+		candidates.extend(_glob.glob(os.path.join(cache, "*.pt")))
+	# 3. Current working directory
+	candidates.extend(_glob.glob("*.pt"))
+	seen = set()
+	result = []
+	for p in candidates:
+		p = os.path.abspath(p)
+		if p not in seen and os.path.isfile(p):
+			seen.add(p)
+			result.append((p, "models"))   # → dist/models/*.pt
+	return result
+
+yolo_model_datas = _find_pt_files()
+print(f"[spec] Bundling {len(yolo_model_datas)} YOLO .pt file(s): {[d[0] for d in yolo_model_datas]}")
+
 a = Analysis(
 	["ai_production_monitor/run.py"],
 	pathex=["ai_production_monitor"],
@@ -21,6 +63,10 @@ a = Analysis(
 		("ai_production_monitor/config/*.json",  "config"),
 		# mediapipe models
 		*mediapipe_datas,
+		# ultralytics yaml/assets
+		*ultralytics_datas,
+		# YOLO .pt weight files → dist/models/
+		*yolo_model_datas,
 	],
 	hiddenimports=[
 		# PyQt5
@@ -48,11 +94,28 @@ a = Analysis(
 		"numpy",
 		"scipy",
 		"PIL",
+		# ultralytics + torch (YOLO Pose backend — optional)
+		*ultralytics_hidden,
+		"torch",
+		"torch.nn",
+		"torch.nn.modules",
+		"torch.cuda",
+		"torch.backends.cuda",
+		"torch.backends.cudnn",
+		# torchvision excluded — conflicts with torch CPU in PyInstaller
+		# torchvision is NOT needed for YOLO Pose inference
+		"ultralytics",
+		"ultralytics.models.yolo",
+		"ultralytics.engine",
+		"ultralytics.utils",
 	],
 	hookspath=[],
 	hooksconfig={},
-	runtime_hooks=[],
-	excludes=[],
+	runtime_hooks=["hooks/rthook_torch_preload.py"],
+	excludes=[
+		# torchvision not needed for YOLO Pose + causes nms operator conflict
+		"torchvision",
+	],
 	win_no_prefer_redirects=False,
 	win_private_assemblies=False,
 	cipher=block_cipher,

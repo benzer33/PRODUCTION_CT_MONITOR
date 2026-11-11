@@ -18,7 +18,7 @@ import statistics
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
-    QFrame, QGroupBox, QHBoxLayout, QLabel,
+    QCheckBox, QFrame, QGroupBox, QHBoxLayout, QLabel,
     QProgressBar, QPushButton, QScrollArea,
     QSizePolicy, QVBoxLayout, QWidget,
 )
@@ -36,7 +36,7 @@ from gui.theme import (
     CLR_MUTED,
 )
 from gui.widgets.video_widget import VideoWidget
-from gui.monitor_screen import _trigger_points_from_config
+from gui.monitor_screen import GhostOverlayWidget, _trigger_points_from_config
 from vision.point_tracker_thread import PointTrackerThread
 
 
@@ -115,6 +115,10 @@ class GoldenCycleScreen(QWidget):
         self._min_cycles = config.get_min_golden_cycles()
         self._max_cycles = config.get_max_golden_cycles()
 
+        # frame size cache for skeleton coordinate scaling
+        self._last_frame_w: int = 0
+        self._last_frame_h: int = 0
+
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -158,9 +162,36 @@ class GoldenCycleScreen(QWidget):
 
         # ---- Left: video + state ----
         left = QVBoxLayout()
-        self._video = VideoWidget()
-        self._video.setMinimumSize(520, 292)
-        left.addWidget(self._video)
+
+        # Skeleton toggle checkbox
+        skel_row = QHBoxLayout()
+        self._chk_skeleton = QCheckBox("แสดงโครงมือ  (Show Hand Skeleton)")
+        self._chk_skeleton.setFont(make_font(FONT_SIZE_LABEL))
+        self._chk_skeleton.setStyleSheet("color: #4dd0e1;")
+        self._chk_skeleton.setChecked(self._config.get_show_skeleton())
+        self._chk_skeleton.toggled.connect(self._on_skeleton_toggled)
+        skel_row.addWidget(self._chk_skeleton)
+        skel_row.addStretch()
+        left.addLayout(skel_row)
+
+        # Video container (for overlay positioning)
+        video_container = QWidget()
+        video_container.setMinimumSize(520, 292)
+        vc_layout = QVBoxLayout(video_container)
+        vc_layout.setContentsMargins(0, 0, 0, 0)
+        self._video = VideoWidget(video_container)
+        vc_layout.addWidget(self._video)
+
+        # Transparent skeleton overlay on top of VideoWidget
+        self._skeleton_overlay = GhostOverlayWidget(self._video)
+        self._skeleton_overlay.resize(self._video.size())
+        self._skeleton_overlay.set_show_skeleton(self._config.get_show_skeleton())
+        if self._config.get_show_skeleton():
+            self._skeleton_overlay.show()
+        else:
+            self._skeleton_overlay.hide()
+
+        left.addWidget(video_container)
 
         # State HUD
         state_row = QHBoxLayout()
@@ -265,6 +296,62 @@ class GoldenCycleScreen(QWidget):
         root.addLayout(body)
 
     # ------------------------------------------------------------------
+    # Resize — keep overlay synced to VideoWidget size
+    # ------------------------------------------------------------------
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_skeleton_overlay") and hasattr(self, "_video"):
+            self._skeleton_overlay.resize(self._video.size())
+
+    # ------------------------------------------------------------------
+    # Skeleton toggle
+    # ------------------------------------------------------------------
+
+    def _on_skeleton_toggled(self, checked: bool) -> None:
+        self._config.set_show_skeleton(checked)
+        self._skeleton_overlay.set_show_skeleton(checked)
+        if checked:
+            self._skeleton_overlay.show()
+        else:
+            self._skeleton_overlay.hide()
+
+    def _on_skeleton_updated(self, all_hands_frame_pts: list) -> None:
+        """Scale frame-pixel skeleton to widget space and push to overlay."""
+        if not self._chk_skeleton.isChecked():
+            return
+        if not all_hands_frame_pts:
+            self._skeleton_overlay.set_skeleton([])
+            return
+        fw = self._last_frame_w
+        fh = self._last_frame_h
+        if fw == 0 or fh == 0:
+            return
+        # Use image_rect() to account for letterbox offset + scale
+        ir = self._video.image_rect()
+        scale_x = ir.width()  / fw
+        scale_y = ir.height() / fh
+        off_x   = ir.x()
+        off_y   = ir.y()
+        scaled = [
+            [(off_x + x * scale_x, off_y + y * scale_y) for x, y in hand]
+            for hand in all_hands_frame_pts
+        ]
+        self._skeleton_overlay.set_skeleton(scaled)
+        if not self._skeleton_overlay.isVisible():
+            self._skeleton_overlay.show()
+
+    def _on_frame_received(self, frame) -> None:
+        """Cache frame dimensions + keep overlay synced to video size."""
+        if frame is not None and hasattr(frame, "shape"):
+            h, w = frame.shape[:2]
+            self._last_frame_w = w
+            self._last_frame_h = h
+        # Keep overlay filling the VideoWidget (same as monitor_screen does per frame)
+        if self._skeleton_overlay.size() != self._video.size():
+            self._skeleton_overlay.resize(self._video.size())
+
+    # ------------------------------------------------------------------
     # Recording control
     # ------------------------------------------------------------------
 
@@ -286,6 +373,8 @@ class GoldenCycleScreen(QWidget):
 
         self._tracker_thread = PointTrackerThread(self._config, trigger_points)
         self._tracker_thread.frame_ready.connect(self._video.set_frame)
+        self._tracker_thread.frame_ready.connect(self._on_frame_received)
+        self._tracker_thread.hand_skeleton_updated.connect(self._on_skeleton_updated)
         self._tracker_thread.error_occurred.connect(self._on_error)
         self._tracker_thread.point_triggered.connect(self._on_point_triggered)
         self._tracker_thread.point_triggered_with_hand.connect(self._on_point_triggered_with_hand)
@@ -304,6 +393,7 @@ class GoldenCycleScreen(QWidget):
         self._cycle_tracker = None
         self._point_was_active = {}   # clear stale states
         self._prev_point_states_by_hand = {}
+        self._skeleton_overlay.reset()
 
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)

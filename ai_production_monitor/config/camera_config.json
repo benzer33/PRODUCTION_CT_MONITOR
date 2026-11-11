@@ -1,5 +1,5 @@
 {
-  "type": "video_file",
+  "type": "webcam",
   "width": 1280,
   "height": 720,
   "fps": 30,
@@ -7,6 +7,6 @@
   "mirror_horizontal": true,
   "device_index": 0,
   "url": "",
-  "file_path": "C:/Users/ronnachai/Downloads/OK9.mp4",
-  "loop": true
+  "username": "",
+  "password": ""
 }

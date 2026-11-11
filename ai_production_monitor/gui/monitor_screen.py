@@ -37,6 +37,9 @@ from core.ghost_interpolator import (
 )
 from vision.skeleton_overlay import (
     HAND_CONNECTIONS,
+    BODY_CONNECTIONS,
+    HAND_KP_COUNT,
+    BODY_KP_COUNT,
     SKELETON_JOINT_COLOR,
     SKELETON_JOINT_RADIUS,
     SKELETON_LINE_COLOR,
@@ -257,15 +260,20 @@ class GhostOverlayWidget(QWidget):
             lc = QColor(*SKELETON_LINE_COLOR)
             jc = QColor(*SKELETON_JOINT_COLOR)
             for pts in self._skeleton_pts:
-                if len(pts) != 21:
+                n_pts = len(pts)
+                if n_pts == HAND_KP_COUNT:
+                    connections = HAND_CONNECTIONS
+                elif n_pts == BODY_KP_COUNT:
+                    connections = BODY_CONNECTIONS
+                else:
                     continue
 
                 # Edges
                 pen = QPen(lc, SKELETON_LINE_WIDTH, Qt.SolidLine)
                 painter.setPen(pen)
                 painter.setBrush(Qt.NoBrush)
-                for a, b in HAND_CONNECTIONS:
-                    if a < len(pts) and b < len(pts):
+                for a, b in connections:
+                    if a < n_pts and b < n_pts:
                         painter.drawLine(QPointF(*pts[a]), QPointF(*pts[b]))
 
                 # Joints
@@ -597,32 +605,25 @@ class MonitorScreen(QWidget):
             self._ghost_overlay.hide()
 
     def _on_skeleton_updated(self, all_hands_frame_pts: list) -> None:
-        """Receive per-hand frame-pixel landmark lists and scale to widget space.
-
-        Parameters
-        ----------
-        all_hands_frame_pts : list[list[(x, y)]]
-            One inner list of 21 (x, y) pixel tuples per detected hand.
-            Empty list when no hands are in the frame.
-        """
+        """Receive per-hand frame-pixel landmark lists and scale to widget space."""
         if not self._chk_skeleton.isChecked():
             return
         if not all_hands_frame_pts:
             self._ghost_overlay.set_skeleton([])
             return
-        fw = self._last_frame_w or self._video.width()
-        fh = self._last_frame_h or self._video.height()
+        fw = self._last_frame_w
+        fh = self._last_frame_h
         if fw <= 0 or fh <= 0:
             return
-        scale = min(self._video.width() / fw, self._video.height() / fh)
-        scaled_w = fw * scale
-        scaled_h = fh * scale
-        off_x = (self._video.width()  - scaled_w) / 2.0
-        off_y = (self._video.height() - scaled_h) / 2.0
-        # Scale every hand's landmark list to widget space
+        # Use image_rect() to get the exact rendered area (accounts for letterbox)
+        ir = self._video.image_rect()
+        scale_x = ir.width()  / fw
+        scale_y = ir.height() / fh
+        off_x   = ir.x()
+        off_y   = ir.y()
         widget_hands = [
             [
-                (off_x + x * scale, off_y + y * scale)
+                (off_x + x * scale_x, off_y + y * scale_y)
                 for x, y in hand_pts
             ]
             for hand_pts in all_hands_frame_pts

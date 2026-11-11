@@ -41,6 +41,7 @@
     <Compile Include="ai_production_monitor\gui\ai_settings_screen.py" />
     <Compile Include="ai_production_monitor\gui\calibration_screen.py" />
     <Compile Include="ai_production_monitor\gui\camera_screen.py" />
+    <Compile Include="ai_production_monitor\gui\detector_settings_screen.py" />
     <Compile Include="ai_production_monitor\gui\font_settings_screen.py" />
     <Compile Include="ai_production_monitor\gui\golden_cycle_screen.py" />
     <Compile Include="ai_production_monitor\gui\main_window.py" />
@@ -70,6 +71,7 @@
     <Compile Include="ai_production_monitor\vision\skeleton_overlay.py" />
     <Compile Include="ai_production_monitor\vision\__init__.py" />
     <Compile Include="ai_production_monitor\__init__.py" />
+    <Compile Include="hooks\rthook_torch_preload.py" />
     <Compile Include="PRODUCTION_CT_MONITOR.py" />
     <Compile Include="_fix_camera_loop.py" />
     <Compile Include="_patch_process_frame.py" />
@@ -86,6 +88,7 @@
     <Folder Include="ai_production_monitor\tests\" />
     <Folder Include="ai_production_monitor\utils\" />
     <Folder Include="ai_production_monitor\vision\" />
+    <Folder Include="hooks\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="ai_production_monitor\.env.example" />

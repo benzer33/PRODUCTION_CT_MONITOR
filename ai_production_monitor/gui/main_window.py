@@ -42,6 +42,7 @@ from data.database import DatabaseManager
 from gui.calibration_screen import CalibrationScreen
 from gui.camera_screen import CameraScreen
 from gui.ai_settings_screen import AISettingsScreen
+from gui.detector_settings_screen import DetectorSettingsScreen
 from gui.font_settings_screen import FontSettingsScreen
 from gui.golden_cycle_screen import GoldenCycleScreen
 from gui.monitor_screen import MonitorScreen
@@ -74,8 +75,9 @@ IDX_CALIBRATION   = 1
 IDX_GOLDEN        = 2
 IDX_MONITOR       = 3
 IDX_SUMMARY       = 4
-IDX_FONT_SETTINGS = 5
-IDX_AI_SETTINGS   = 6
+IDX_FONT_SETTINGS       = 5
+IDX_AI_SETTINGS         = 6
+IDX_DETECTOR_SETTINGS   = 7
 
 
 class MainWindow(QMainWindow):
@@ -153,6 +155,13 @@ class MainWindow(QMainWindow):
             lambda: self._go(IDX_CAMERA)
         )
 
+        # 7 — Detector Settings
+        self._detector_settings_screen = DetectorSettingsScreen(self._config)
+        self._stack.addWidget(self._detector_settings_screen)
+        self._detector_settings_screen.back_requested.connect(
+            lambda: self._go(IDX_CAMERA)
+        )
+
     def _build_menu(self) -> None:
         menubar = self.menuBar()
 
@@ -183,6 +192,11 @@ class MainWindow(QMainWindow):
         act_ai.setToolTip("ปรับ Model, Prompt Template, Output Format")
         act_ai.triggered.connect(lambda: self._go(IDX_AI_SETTINGS))
         tools.addAction(act_ai)
+
+        act_detector = QAction("🤚  ตั้งค่า Hand Detector", self)
+        act_detector.setToolTip("เลือก Backend, Device (CPU/CUDA), ดู Status")
+        act_detector.triggered.connect(lambda: self._go(IDX_DETECTOR_SETTINGS))
+        tools.addAction(act_detector)
 
     def _build_status_bar(self) -> None:
         self._status_lbl = QLabel("พร้อมใช้งาน")

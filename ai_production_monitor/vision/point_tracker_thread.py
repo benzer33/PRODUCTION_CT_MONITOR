@@ -160,6 +160,12 @@ class PointTrackerThread(QThread):
 
         # ── สร้าง PointTriggerDetector ──────────────────────────────
         station_cfg = self._config.get_station(station_id) or {}
+
+        # Build hand detector from config
+        from vision.hand_tracker import create_detector
+        det_cfg      = self._config.get_detector_config()
+        hand_detector = create_detector(det_cfg)
+
         self._detector = PointTriggerDetector(
             trigger_points    = self._points,
             trigger_confirm   = station_cfg.get("trigger_confirm_frames", 5),
@@ -169,7 +175,7 @@ class PointTrackerThread(QThread):
             on_state_change   = self._cb_state_change,
             on_hand_position  = self._cb_hand_pos,
         )
-        self._detector.start()
+        self._detector.start(detector=hand_detector)
         self._detector.reset_cycle()  # เริ่มด้วย WAITING_FOR_CLEAR เสมอ
 
         # ── Main frame loop ─────────────────────────────────────────
@@ -192,13 +198,25 @@ class PointTrackerThread(QThread):
             result = self._detector.process_frame(frame)
 
             # Emit skeleton landmarks for ALL detected hands (visual-only).
-            # Emits a list of 21-point pixel-coord lists, one entry per hand.
-            # Empty list when no hands are detected.
+            # MediaPipe: landmarks are NormalizedLandmark → need landmarks_to_pixels.
+            # YOLO Pose: landmarks are pixel-space; deduplicate skeletons because
+            # Left+Right from the same person share identical 17-pt landmark list.
             h, w = frame.shape[:2]
-            all_skeletons = [
-                landmarks_to_pixels(lms, w, h)
-                for lms in result.full_landmarks.values()
-            ] if result.full_landmarks else []
+            all_skeletons = []
+            seen_skeleton_ids: set = set()
+            for lms in (result.full_landmarks or {}).values():
+                if not lms:
+                    continue
+                # Deduplicate by object identity (YOLO shares same list per person)
+                lms_id = id(lms)
+                if lms_id in seen_skeleton_ids:
+                    continue
+                seen_skeleton_ids.add(lms_id)
+                sample_x = lms[0].x if hasattr(lms[0], "x") else 0
+                if sample_x > 2.0:
+                    all_skeletons.append([(kp.x, kp.y) for kp in lms])
+                else:
+                    all_skeletons.append(landmarks_to_pixels(lms, w, h))
             self.hand_skeleton_updated.emit(all_skeletons)
 
             # Annotate frame สำหรับแสดงผล

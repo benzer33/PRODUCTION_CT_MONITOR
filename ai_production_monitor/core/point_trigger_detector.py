@@ -587,19 +587,30 @@ class PointTriggerDetector:
             machine._on_trigger = _make_trigger_cb(_pid, _hand)
             machine._on_state   = _make_state_cb(_pid, _hand)
 
-        self._trajectory = TrajectoryRecorder()
-        self._hand_tracker = None   # lazy init เพื่อไม่โหลด MediaPipe จนกว่าจะใช้
+        self._trajectory   = TrajectoryRecorder()
+        # _hand_tracker: lazy-init fallback (MediaPipe) if no detector injected
+        self._hand_tracker = None
+        # External detector injected via set_detector() or start(detector=...)
+        self._detector_ext = None   # BaseHandDetector | None
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def start(self) -> None:
+    def start(self, detector=None) -> None:
         """
         เริ่มต้น detector — โหลด MediaPipe และ reset state ทุกจุด
         เรียกหนึ่งครั้งก่อนเริ่ม process_frame loop
+
+        Parameters
+        ----------
+        detector : BaseHandDetector | None
+            External detector to use.  When None, falls back to the
+            previously set detector or creates a default MediaPipe one.
         """
-        if self._hand_tracker is None:
+        if detector is not None:
+            self._detector_ext = detector
+        if self._detector_ext is None and self._hand_tracker is None:
             from vision.hand_tracker import HandTracker
             self._hand_tracker = HandTracker()
         self.reset_all()
@@ -619,7 +630,10 @@ class PointTriggerDetector:
         self._trajectory.start_cycle()
 
     def close(self) -> None:
-        """ปิด MediaPipe resources"""
+        """ปิด MediaPipe / detector resources"""
+        if self._detector_ext:
+            self._detector_ext.close()
+            self._detector_ext = None
         if self._hand_tracker:
             self._hand_tracker.close()
             self._hand_tracker = None
@@ -645,7 +659,7 @@ class PointTriggerDetector:
         ───────
         FrameResult
         """
-        if self._hand_tracker is None:
+        if self._detector_ext is None and self._hand_tracker is None:
             self.start()   # auto-init ถ้ายังไม่ได้เรียก start()
 
         ts = time.monotonic()
@@ -654,7 +668,8 @@ class PointTriggerDetector:
         # NOTE (Phase-2 warning): MediaPipe may swap Left/Right labels briefly
         # when hands cross or overlap.  Phase-2 anomaly logic must debounce
         # handedness before acting on it to avoid false alarms.
-        all_hands = self._hand_tracker.process_all(frame)
+        _active_detector = self._detector_ext or self._hand_tracker
+        all_hands = _active_detector.process_all(frame)
 
         # Map handedness -> HandResult (keep last if duplicate label, very rare)
         hands_by_side = {}
@@ -666,7 +681,15 @@ class PointTriggerDetector:
         hx, hy = 0.0, 0.0
         primary_landmarks = []
         if primary and primary.detected:
-            if self._use_palm and primary.landmarks:
+            # Use palm centroid only for MediaPipe (21-pt landmarks).
+            # YOLO landmarks are body keypoints — use the pre-computed hand
+            # estimate (hr.x, hr.y) which already has the extend offset applied.
+            _is_mediapipe_lm = (
+                self._use_palm
+                and primary.landmarks
+                and len(primary.landmarks) == 21
+            )
+            if _is_mediapipe_lm:
                 hx, hy = self._palm_centroid(
                     primary.landmarks, frame.shape[1], frame.shape[0]
                 )
@@ -686,7 +709,12 @@ class PointTriggerDetector:
         for (pid, hand), machine in self._machines.items():
             hr_for_hand = hands_by_side.get(hand)
             if hr_for_hand is not None and hr_for_hand.detected:
-                if self._use_palm and hr_for_hand.landmarks:
+                _is_mediapipe_lm = (
+                    self._use_palm
+                    and hr_for_hand.landmarks
+                    and len(hr_for_hand.landmarks) == 21
+                )
+                if _is_mediapipe_lm:
                     _hx, _hy = self._palm_centroid(
                         hr_for_hand.landmarks, frame.shape[1], frame.shape[0]
                     )
@@ -879,14 +907,22 @@ class PointTriggerDetector:
         คำนวณ centroid ของ palm จาก landmark 0, 5, 9, 13, 17
         (wrist + 4 MCP joints) ในพิกัด pixel
 
-        ใช้แทน wrist เพราะ stable กว่าตอนมือหงาย/คว่ำ
+        รองรับทั้ง MediaPipe (normalised 0-1) และ YOLO (pixel coords แล้ว)
+        ตรวจด้วย heuristic: ถ้า lm.x > 2.0 ถือว่าเป็น pixel coords
         """
         xs, ys = [], []
         for idx in self._PALM_LANDMARKS:
             if idx < len(landmarks):
                 lm = landmarks[idx]
-                xs.append(lm.x * frame_w)
-                ys.append(lm.y * frame_h)
+                raw_x = float(lm.x)
+                raw_y = float(lm.y)
+                # Heuristic: YOLO gives pixel coords (> 2.0), MediaPipe gives [0,1]
+                if raw_x > 2.0 or raw_y > 2.0:
+                    xs.append(raw_x)
+                    ys.append(raw_y)
+                else:
+                    xs.append(raw_x * frame_w)
+                    ys.append(raw_y * frame_h)
         if not xs:
             return 0.0, 0.0
         return sum(xs) / len(xs), sum(ys) / len(ys)

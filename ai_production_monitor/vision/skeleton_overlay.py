@@ -49,13 +49,39 @@ HAND_CONNECTIONS: frozenset[tuple[int, int]] = frozenset([
 ])
 
 # ---------------------------------------------------------------------------
+# BODY_CONNECTIONS — COCO 17-point body skeleton (YOLO Pose output)
+# ---------------------------------------------------------------------------
+# Keypoint indices:
+#  0:nose  1:left_eye  2:right_eye  3:left_ear   4:right_ear
+#  5:left_shoulder     6:right_shoulder
+#  7:left_elbow        8:right_elbow
+#  9:left_wrist       10:right_wrist
+# 11:left_hip         12:right_hip
+# 13:left_knee        14:right_knee
+# 15:left_ankle       16:right_ankle
+
+BODY_CONNECTIONS: frozenset[tuple[int, int]] = frozenset([
+    # Shoulders
+    (5, 6),
+    # Left arm
+    (5, 7), (7, 9),
+    # Right arm
+    (6, 8), (8, 10),
+    # Torso (shoulders → hips)
+    (5, 11), (6, 12), (11, 12),
+])
+
+HAND_KP_COUNT = 21
+BODY_KP_COUNT = 17
+
+# ---------------------------------------------------------------------------
 # Visual style constants  (cyan tone — distinct from green ghost/zone markers)
 # ---------------------------------------------------------------------------
 # Qt-compatible (R, G, B, A) tuples used by GhostOverlayWidget.paintEvent
-SKELETON_LINE_COLOR  = (0, 210, 220, 160)   # cyan, semi-transparent
-SKELETON_JOINT_COLOR = (0, 240, 255, 200)   # brighter cyan for joints
-SKELETON_LINE_WIDTH  = 1                    # px — thin, non-intrusive
-SKELETON_JOINT_RADIUS = 3                   # px
+SKELETON_LINE_COLOR  = (0, 210, 220, 180)   # cyan, semi-transparent
+SKELETON_JOINT_COLOR = (0, 240, 255, 220)   # brighter cyan for joints
+SKELETON_LINE_WIDTH  = 3                    # px — thick enough to see
+SKELETON_JOINT_RADIUS = 5                   # px
 
 
 # ---------------------------------------------------------------------------

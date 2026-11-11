@@ -252,6 +252,34 @@ class ConfigHandler:
         self.save()
 
     # ------------------------------------------------------------------
+    # Hand Detector config
+    # ------------------------------------------------------------------
+
+    _DETECTOR_DEFAULTS: dict = {
+        "backend":          "mediapipe",   # "mediapipe" | "yolo_pose"
+        # MediaPipe params
+        "mp_max_hands":       2,
+        "mp_detection_conf":  0.6,
+        "mp_tracking_conf":   0.5,
+        # YOLO Pose params
+        "yolo_model":         "yolov8n-pose.pt",
+        "yolo_confidence":    0.4,
+        "yolo_device":        "cpu",      # cpu = stable; cuda = needs matching driver
+        "yolo_kp_conf_min":   0.3,
+        "yolo_hand_extend":   0.35,        # fraction of forearm to extend past wrist
+    }
+
+    def get_detector_config(self) -> dict:
+        """Return persisted detector config merged with defaults."""
+        saved = self._data.get("ui", {}).get("detector", {})
+        return {**self._DETECTOR_DEFAULTS, **saved}
+
+    def set_detector_config(self, cfg: dict) -> None:
+        """Persist detector config and save."""
+        self._data.setdefault("ui", {})["detector"] = cfg
+        self.save()
+
+    # ------------------------------------------------------------------
     # Font settings
     # ------------------------------------------------------------------
 

@@ -49,7 +49,7 @@ from PyQt5.QtGui import (
     QColor, QFont, QImage, QPainter, QPixmap,
 )
 from PyQt5.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFormLayout,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout,
     QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QSizePolicy, QSpinBox,
     QStackedWidget, QVBoxLayout, QWidget,
@@ -692,6 +692,99 @@ class CameraScreen(QWidget):
         cap_form.addRow("", self._chk_mirror)
 
         layout.addWidget(cap_grp)
+
+        # ── Hand Detection settings ──
+        det_grp = _group("Hand Detection")
+        det_form = QFormLayout(det_grp)
+        det_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        det_form.setSpacing(8)
+
+        self._combo_det_backend = QComboBox()
+        self._combo_det_backend.addItem("MediaPipe Hands",  "mediapipe")
+        self._combo_det_backend.addItem("YOLO Pose (ยาว/มุมสูง)", "yolo_pose")
+        self._combo_det_backend.setStyleSheet(_INPUT_STYLE)
+        self._combo_det_backend.setFont(make_font(FONT_SIZE_BODY))
+        self._combo_det_backend.currentIndexChanged.connect(self._on_det_backend_changed)
+        det_form.addRow(_lbl("Backend:"), self._combo_det_backend)
+
+        # --- MediaPipe sub-settings
+        self._mp_widget = QWidget()
+        mp_form = QFormLayout(self._mp_widget)
+        mp_form.setContentsMargins(0, 0, 0, 0)
+        mp_form.setSpacing(6)
+
+        self._spin_mp_detect = QDoubleSpinBox()
+        self._spin_mp_detect.setRange(0.1, 1.0)
+        self._spin_mp_detect.setSingleStep(0.05)
+        self._spin_mp_detect.setDecimals(2)
+        self._spin_mp_detect.setValue(0.6)
+        self._spin_mp_detect.setStyleSheet(_INPUT_STYLE)
+        mp_form.addRow(_lbl("Detection conf:"), self._spin_mp_detect)
+
+        self._spin_mp_track = QDoubleSpinBox()
+        self._spin_mp_track.setRange(0.1, 1.0)
+        self._spin_mp_track.setSingleStep(0.05)
+        self._spin_mp_track.setDecimals(2)
+        self._spin_mp_track.setValue(0.5)
+        self._spin_mp_track.setStyleSheet(_INPUT_STYLE)
+        mp_form.addRow(_lbl("Tracking conf:"), self._spin_mp_track)
+        det_form.addRow(self._mp_widget)
+
+        # --- YOLO sub-settings
+        self._yolo_widget = QWidget()
+        yolo_form = QFormLayout(self._yolo_widget)
+        yolo_form.setContentsMargins(0, 0, 0, 0)
+        yolo_form.setSpacing(6)
+
+        self._combo_yolo_model = QComboBox()
+        for _lbl_txt, _val in [
+            ("Nano  (เร็ว)",   "yolov8n-pose.pt"),
+            ("Small",           "yolov8s-pose.pt"),
+            ("Medium",          "yolov8m-pose.pt"),
+            ("v11 Nano",        "yolo11n-pose.pt"),
+            ("v11 Small",       "yolo11s-pose.pt"),
+        ]:
+            self._combo_yolo_model.addItem(_lbl_txt, _val)
+        self._combo_yolo_model.setStyleSheet(_INPUT_STYLE)
+        yolo_form.addRow(_lbl("Model:"), self._combo_yolo_model)
+
+        self._spin_yolo_conf = QDoubleSpinBox()
+        self._spin_yolo_conf.setRange(0.1, 1.0)
+        self._spin_yolo_conf.setSingleStep(0.05)
+        self._spin_yolo_conf.setDecimals(2)
+        self._spin_yolo_conf.setValue(0.4)
+        self._spin_yolo_conf.setStyleSheet(_INPUT_STYLE)
+        yolo_form.addRow(_lbl("Confidence:"), self._spin_yolo_conf)
+
+        self._combo_yolo_device = QComboBox()
+        self._combo_yolo_device.addItem("CPU (แนะนำ)", "cpu")
+        self._combo_yolo_device.addItem("Auto",        "")
+        self._combo_yolo_device.addItem("CUDA (GPU)",  "cuda")
+        self._combo_yolo_device.setStyleSheet(_INPUT_STYLE)
+        yolo_form.addRow(_lbl("Device:"), self._combo_yolo_device)
+
+        self._spin_yolo_extend = QDoubleSpinBox()
+        self._spin_yolo_extend.setRange(0.0, 1.0)
+        self._spin_yolo_extend.setSingleStep(0.05)
+        self._spin_yolo_extend.setDecimals(2)
+        self._spin_yolo_extend.setValue(0.55)
+        self._spin_yolo_extend.setStyleSheet(_INPUT_STYLE)
+        self._spin_yolo_extend.setToolTip(
+            "เลื่อนตำแหน่งมือจากข้อมือ\n"
+            "0 = ใช้ตำแหน่งข้อมือตรงๆ\n"
+            "0.35 = เลื่อน 35% ของความยาวท่อนแขน (ค่าแนะนำ)"
+        )
+        yolo_form.addRow(_lbl("เลื่อนมือ (Hand extend):"), self._spin_yolo_extend)
+
+        self._lbl_ultralytics = QLabel("")
+        self._lbl_ultralytics.setFont(make_font(FONT_SIZE_BODY - 1))
+        self._lbl_ultralytics.setStyleSheet("color: #78909c;")
+        self._lbl_ultralytics.setWordWrap(True)
+        yolo_form.addRow(self._lbl_ultralytics)
+        det_form.addRow(self._yolo_widget)
+
+        layout.addWidget(det_grp)
+        self._on_det_backend_changed()  # sync visibility
         layout.addStretch()
 
         # ── Action buttons ──
@@ -999,6 +1092,9 @@ class CameraScreen(QWidget):
         )
         self._config.save()
 
+        # Save Hand Detector config
+        self._config.set_detector_config(self._build_detector_config_dict())
+
         self._stop_preview()
         self.camera_saved.emit()
 
@@ -1019,6 +1115,10 @@ class CameraScreen(QWidget):
         # Load RTSP bookmarks into the RTSP panel
         bookmarks = self._config.get_rtsp_bookmarks()
         self._panel_rtsp.load_bookmarks(bookmarks)
+
+        # Load Hand Detector config
+        det_cfg = self._config.get_detector_config()
+        self._apply_detector_config_to_ui(det_cfg)
 
     def _apply_config_to_ui(self, cfg: dict) -> None:
         type_key = cfg.get("type", "webcam")
@@ -1056,6 +1156,61 @@ class CameraScreen(QWidget):
         self._spin_fps.setValue(cfg.get("fps", 30))
         self._chk_reconnect.setChecked(cfg.get("reconnect_on_failure", True))
         self._chk_mirror.setChecked(cfg.get("mirror_horizontal", False))
+
+    def _on_det_backend_changed(self) -> None:
+        """Show/hide MediaPipe or YOLO sub-settings."""
+        backend = self._combo_det_backend.currentData()
+        is_yolo = backend == "yolo_pose"
+        self._mp_widget.setVisible(not is_yolo)
+        self._yolo_widget.setVisible(is_yolo)
+        if is_yolo:
+            try:
+                import ultralytics  # noqa: F401
+                self._lbl_ultralytics.setText("✅ ultralytics พร้อมใช้งาน")
+                self._lbl_ultralytics.setStyleSheet("color: #66bb6a;")
+            except Exception as _e:
+                self._lbl_ultralytics.setText(
+                    f"⚠️ โหลด ultralytics ไม่ได้\n{_e}\n"
+                    "ลอง: pip install ultralytics  หรือตรวจสอบ CUDA/GPU driver"
+                )
+                self._lbl_ultralytics.setStyleSheet("color: #ef9a9a;")
+
+    def _apply_detector_config_to_ui(self, cfg: dict) -> None:
+        """Populate Hand Detection widgets from cfg dict."""
+        backend = cfg.get("backend", "mediapipe")
+        for i in range(self._combo_det_backend.count()):
+            if self._combo_det_backend.itemData(i) == backend:
+                self._combo_det_backend.setCurrentIndex(i)
+                break
+        self._spin_mp_detect.setValue(cfg.get("mp_detection_conf", 0.6))
+        self._spin_mp_track.setValue(cfg.get("mp_tracking_conf",   0.5))
+        yolo_model = cfg.get("yolo_model", "yolov8n-pose.pt")
+        for i in range(self._combo_yolo_model.count()):
+            if self._combo_yolo_model.itemData(i) == yolo_model:
+                self._combo_yolo_model.setCurrentIndex(i)
+                break
+        self._spin_yolo_conf.setValue(cfg.get("yolo_confidence", 0.4))
+        yolo_dev = cfg.get("yolo_device", "")
+        for i in range(self._combo_yolo_device.count()):
+            if self._combo_yolo_device.itemData(i) == yolo_dev:
+                self._combo_yolo_device.setCurrentIndex(i)
+                break
+        self._spin_yolo_extend.setValue(cfg.get("yolo_hand_extend", 0.35))
+        self._on_det_backend_changed()
+
+    def _build_detector_config_dict(self) -> dict:
+        """Read Hand Detection widgets into a detector-config dict."""
+        return {
+            "backend":          self._combo_det_backend.currentData(),
+            "mp_max_hands":     2,
+            "mp_detection_conf": self._spin_mp_detect.value(),
+            "mp_tracking_conf":  self._spin_mp_track.value(),
+            "yolo_model":       self._combo_yolo_model.currentData(),
+            "yolo_confidence":  self._spin_yolo_conf.value(),
+            "yolo_device":      self._combo_yolo_device.currentData(),
+            "yolo_kp_conf_min": 0.3,
+            "yolo_hand_extend": self._spin_yolo_extend.value(),
+        }
 
     # ================================================================== #
     # Bookmark management
